@@ -7,10 +7,7 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <style>
-    * {box-sizing:border-box;margin:0;padding:0}
-    body{background:#F4F6F3;font-family:sans-serif;overflow-x:hidden}
-  </style>
+  <style>* {box-sizing:border-box;margin:0;padding:0} body{background:#F4F6F3;font-family:sans-serif;overflow-x:hidden}</style>
 </head>
 <body>
   <div id="root"></div>
@@ -519,8 +516,8 @@ function ParentPortalPublic({token}) {
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:16}}>
                     {mats.map(m=>{
                       const n        = pNotes[m.id];
-                      const matActs  = activs.filter(a=>a.materia_id===m.id&&a.periodo===period+1);
-                      const selected = selectedMat===m.id;
+                      const matActs  = activs.filter(a=>String(a.materia_id)===String(m.id)&&Number(a.periodo)===period+1);
+                      const selected = String(selectedMat)===String(m.id);
                       return (
                         <div key={m.id} onClick={()=>setSelectedMat(selected?null:m.id)}
                           style={{background:selected?"rgba(82,183,136,0.2)":"rgba(255,255,255,0.08)",borderRadius:12,padding:"14px 12px",textAlign:"center",border:`1px solid ${selected?"#52B788":"rgba(255,255,255,0.1)"}`,cursor:"pointer",transition:"all .2s"}}>
@@ -528,7 +525,7 @@ function ParentPortalPublic({token}) {
                           <div style={{fontSize:11,color:"rgba(255,255,255,0.6)",marginBottom:6,fontWeight:500}}>{m.nombre}</div>
                           <div style={{fontFamily:"Georgia,serif",fontSize:26,fontWeight:700,color:nClr(n)}}>{fmt(n)}</div>
                           <div style={{fontSize:10,color:nClr(n),fontWeight:600,marginTop:2}}>{lbl(n)}</div>
-                          {matActs.length>0&&<div style={{fontSize:9,color:"rgba(255,255,255,0.4)",marginTop:5}}>📋 {matActs.length} actividad(es)</div>}
+                          <div style={{fontSize:9,color:"rgba(255,255,255,0.4)",marginTop:5}}>📋 {matActs.length} actividad(es)</div>
                           {m.docente&&<div style={{fontSize:9,color:"rgba(255,255,255,0.35)",marginTop:2}}>👩‍🏫 {m.docente}</div>}
                         </div>
                       );
@@ -537,8 +534,8 @@ function ParentPortalPublic({token}) {
 
                   {/* DETALLE ACTIVIDADES DE LA MATERIA SELECCIONADA */}
                   {selectedMat&&(()=>{
-                    const mat     = mats.find(m=>m.id===selectedMat);
-                    const matActs = activs.filter(a=>a.materia_id===selectedMat&&a.periodo===period+1);
+                    const mat     = mats.find(m=>String(m.id)===String(selectedMat));
+                    const matActs = activs.filter(a=>String(a.materia_id)===String(selectedMat)&&Number(a.periodo)===period+1);
                     const matProm = avgPonderado(matActs);
 
                     // agrupar por semana
