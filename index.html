@@ -1,0 +1,2463 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Mis Pequeños Tesoros</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * {box-sizing:border-box;margin:0;padding:0}
+    body{background:#F4F6F3;font-family:sans-serif;overflow-x:hidden}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ============================================================
+// SUPABASE CONFIG
+// ============================================================
+const SUPA_URL  = "https://ucnvqtlulikqhbmonarb.supabase.co";
+const SUPA_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVjbnZxdGx1bGlrcWhibW9uYXJiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzNjM5MjUsImV4cCI6MjA5NTkzOTkyNX0.RtHv9sznDywBKMW2OYnptbNCnTfd9eDqlX6H0MPTsPc";
+
+const H = { "Content-Type":"application/json", "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}`, "Prefer":"return=representation" };
+
+// ── AUTH ──────────────────────────────────────────────────────
+async function signIn(email, password) {
+  const res = await fetch(`${SUPA_URL}/auth/v1/token?grant_type=password`, {
+    method:"POST",
+    headers:{"Content-Type":"application/json","apikey":SUPA_KEY},
+    body: JSON.stringify({email,password})
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error_description||data.msg||"Credenciales incorrectas");
+  return data;
+}
+async function signOut(token) {
+  await fetch(`${SUPA_URL}/auth/v1/logout`, {
+    method:"POST",
+    headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${token}`}
+  });
+}
+async function getSession() {
+  try {
+    const raw = localStorage.getItem("mpt_session");
+    if (!raw) return null;
+    const session = JSON.parse(raw);
+    // verify token still valid
+    const res = await fetch(`${SUPA_URL}/auth/v1/user`, {
+      headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${session.access_token}`}
+    });
+    if (!res.ok) { localStorage.removeItem("mpt_session"); return null; }
+    return session;
+  } catch { return null; }
+}
+
+// ── DB ────────────────────────────────────────────────────────
+async function sb(path, opts={}, token=null) {
+  const authH = token ? {...H,"Authorization":`Bearer ${token}`} : H;
+  const res = await fetch(`${SUPA_URL}/rest/v1/${path}`, { headers:{...authH,...(opts.headers||{})}, ...opts });
+  if (!res.ok) { const e = await res.text(); throw new Error(e); }
+  const txt = await res.text();
+  return txt ? JSON.parse(txt) : [];
+}
+const GET    = (t, q="")        => sb(q ? `${t}?${q}` : `${t}`);
+const POST   = (t, body)        => sb(t, { method:"POST",  body: JSON.stringify(body) });
+const PATCH  = (t, q, body)     => sb(`${t}?${q}`, { method:"PATCH", body: JSON.stringify(body) });
+const DELETE = (t, q)           => sb(`${t}?${q}`, { method:"DELETE" });
+const UPSERT = (t, body, on)    => sb(`${t}?on_conflict=${on}`, { method:"POST", headers:{...H,"Prefer":"resolution=merge-duplicates,return=representation"}, body: JSON.stringify(body) });
+
+// ============================================================
+// LOGIN SCREEN
+// ============================================================
+function LoginScreen({onLogin}) {
+  const [email,    setEmail]    = useState("");
+  const [password, setPassword] = useState("");
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState("");
+  const [showPass, setShowPass] = useState(false);
+
+  async function handleLogin() {
+    if (!email.trim()||!password.trim()) { setError("Por favor completa todos los campos."); return; }
+    setLoading(true); setError("");
+    try {
+      const session = await signIn(email.trim(), password);
+      localStorage.setItem("mpt_session", JSON.stringify(session));
+      onLogin(session);
+    } catch(e) {
+      setError(e.message);
+    } finally { setLoading(false); }
+  }
+
+  function handleKey(e) { if(e.key==="Enter") handleLogin(); }
+
+  return (
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#0d3320,#1B4332 55%,#2d6a4f)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"sans-serif"}}>
+      <style>{`@keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}} @keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <div style={{background:"#fff",borderRadius:24,padding:"40px 36px",width:"100%",maxWidth:400,boxShadow:"0 32px 80px rgba(0,0,0,0.35)",animation:"fadeUp .45s ease"}}>
+
+        {/* Logo */}
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{width:72,height:72,borderRadius:"50%",background:"linear-gradient(135deg,#0d3320,#1B4332)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:36,margin:"0 auto 14px"}}>🏫</div>
+          <h1 style={{fontFamily:"Georgia,serif",fontSize:22,fontWeight:700,color:"#1B4332",margin:0}}>Mis Pequeños Tesoros</h1>
+          <p style={{fontSize:12,color:"#9ca3af",marginTop:5,letterSpacing:1,textTransform:"uppercase"}}>Plataforma Académica</p>
+        </div>
+
+        {/* Error */}
+        {error&&(
+          <div style={{background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:10,padding:"11px 14px",marginBottom:18,fontSize:13,color:"#DC2626",display:"flex",alignItems:"center",gap:8}}>
+            ⚠️ {error}
+          </div>
+        )}
+
+        {/* Email */}
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:11,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",display:"block",marginBottom:6}}>Correo electrónico</label>
+          <input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={handleKey}
+            placeholder="tu@correo.com"
+            style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1.5px solid #e5e7eb",fontSize:14,fontFamily:"sans-serif",outline:"none",transition:"border .2s"}}
+            onFocus={e=>e.target.style.borderColor="#1B4332"}
+            onBlur={e=>e.target.style.borderColor="#e5e7eb"}/>
+        </div>
+
+        {/* Password */}
+        <div style={{marginBottom:22}}>
+          <label style={{fontSize:11,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",display:"block",marginBottom:6}}>Contraseña</label>
+          <div style={{position:"relative"}}>
+            <input type={showPass?"text":"password"} value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={handleKey}
+              placeholder="••••••••"
+              style={{width:"100%",padding:"12px 44px 12px 14px",borderRadius:10,border:"1.5px solid #e5e7eb",fontSize:14,fontFamily:"sans-serif",outline:"none",boxSizing:"border-box",transition:"border .2s"}}
+              onFocus={e=>e.target.style.borderColor="#1B4332"}
+              onBlur={e=>e.target.style.borderColor="#e5e7eb"}/>
+            <button onClick={()=>setShowPass(s=>!s)}
+              style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#9ca3af",lineHeight:1}}>
+              {showPass?"🙈":"👁️"}
+            </button>
+          </div>
+        </div>
+
+        {/* Button */}
+        <button onClick={handleLogin} disabled={loading}
+          style={{width:"100%",padding:"13px",border:"none",borderRadius:12,background:loading?"#9ca3af":"linear-gradient(135deg,#1B4332,#2d6a4f)",color:"#fff",fontSize:15,fontWeight:700,cursor:loading?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10,transition:"all .2s"}}>
+          {loading?(
+            <><div style={{width:18,height:18,border:"2px solid rgba(255,255,255,0.3)",borderTop:"2px solid #fff",borderRadius:"50%",animation:"spin .7s linear infinite"}}/> Ingresando...</>
+          ):"🔐 Ingresar"}
+        </button>
+
+        <p style={{textAlign:"center",fontSize:11,color:"#c4c4c4",marginTop:20}}>
+          Acceso exclusivo para la dirección del colegio
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+const PERIODOS   = ["Período 1","Período 2","Período 3","Período 4"];
+const GRADES     = ["Pre-K","Kinder","1A","1B","2A","2B","3A","3B","4A","4B","5A","5B","6A","6B"];
+const ICONOS     = ["📚","🔢","📖","🔬","🌎","🎨","⚽","🎵","🖥️","🌿","✏️","🏛️","🧮","🗺️","🧪","📐","🎭","🏃","🙏","💻","🎯","🧠","🎤","🌍"];
+const COLORES    = ["#3B82F6","#8B5CF6","#10B981","#F59E0B","#EC4899","#EF4444","#06B6D4","#84CC16","#F97316","#6366F1","#14B8A6","#A855F7"];
+const TABS       = [["Dashboard","📊"],["Estudiantes","👨‍🎓"],["Actividades","📅"],["Notas","📝"],["Materias","🗂️"],["Comunicaciones","💬"],["Reportes","📋"],["Portal Padres","🔗"]];
+
+// Tipos de actividad con peso y color
+const ACT_TIPOS = {
+  "Evaluación":      {peso:0.30, color:"#DC2626", bg:"#FEE2E2", icon:"📝"},
+  "Proyecto":        {peso:0.25, color:"#7C3AED", bg:"#EDE9FE", icon:"🔬"},
+  "Trabajo en clase":{peso:0.20, color:"#0369A1", bg:"#E0F2FE", icon:"✏️"},
+  "Tarea":           {peso:0.15, color:"#D97706", bg:"#FEF3C7", icon:"🏠"},
+  "Participación":   {peso:0.05, color:"#059669", bg:"#D1FAE5", icon:"🙋"},
+  "Comportamiento":  {peso:0.05, color:"#DB2777", bg:"#FCE7F3", icon:"⭐"},
+};
+
+// Promedio ponderado por tipo
+function avgPonderado(actividades) {
+  if(!actividades||actividades.length===0) return null;
+  let totalPeso=0, totalNota=0;
+  Object.entries(ACT_TIPOS).forEach(([tipo,{peso}])=>{
+    const acts=actividades.filter(a=>a.tipo===tipo&&a.nota!=null);
+    if(acts.length>0){
+      const prom=acts.reduce((s,a)=>s+parseFloat(a.nota),0)/acts.length;
+      totalNota+=prom*peso; totalPeso+=peso;
+    }
+  });
+  return totalPeso>0?totalNota/totalPeso:null;
+}
+
+// Semana ISO
+function semanaLabel(fecha){
+  const d=new Date(fecha+"T00:00:00");
+  const lunes=new Date(d); lunes.setDate(d.getDate()-((d.getDay()+6)%7));
+  const viernes=new Date(lunes); viernes.setDate(lunes.getDate()+4);
+  const fmt2=x=>x.toLocaleDateString("es-CO",{day:"2-digit",month:"short"});
+  return `${fmt2(lunes)} – ${fmt2(viernes)}`;
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+function avg(arr) { const v=arr.filter(x=>x!=null&&!isNaN(x)); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; }
+const fmt   = n  => n==null?"—":Number(n).toFixed(1);
+const nClr  = n  => n==null?"#9ca3af":n>=8.5?"#16a34a":n>=7?"#d97706":"#dc2626";
+const nBg   = n  => n==null?"#f3f4f6":n>=8.5?"#dcfce7":n>=7?"#fef3c7":"#fee2e2";
+const lbl   = n  => n==null?"Sin nota":n>=9?"Sobresaliente":n>=8?"Notable":n>=7?"Aprobado":"En riesgo";
+const tod   = () => new Date().toISOString().split("T")[0];
+const mkAv  = n  => (n||"??").split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+
+// ============================================================
+// SHIELD
+// ============================================================
+function Shield({size=52,url}) {
+  if(url) return <img src={url} alt="Escudo" style={{width:size,height:size,borderRadius:"50%",objectFit:"cover",border:"3px solid rgba(255,255,255,0.5)"}}/>;
+  return <div style={{width:size,height:size,borderRadius:"50%",background:"linear-gradient(135deg,rgba(255,255,255,0.2),rgba(255,255,255,0.05))",border:"2px solid rgba(255,255,255,0.4)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*0.44}}>🏫</div>;
+}
+
+// ============================================================
+// BOLETÍN PREVIEW + PRINT
+// ============================================================
+function Boletin({student, notasMap, obsData, period, materias, logoUrl, onClose}) {
+  const mats = materias.filter(m=>m.activa);
+  const prom = avg(mats.map(m=>notasMap[m.id]));
+
+  function doPrint() {
+    const st = document.createElement("style");
+    st.id = "mpt-ps";
+    st.innerHTML = `@media print{body>*:not(#mpt-br){display:none!important}#mpt-br{position:fixed!important;inset:0!important;background:#fff!important;z-index:99999!important;overflow:visible!important}#mpt-tb{display:none!important}#mpt-sh{box-shadow:none!important;border-radius:0!important;max-height:none!important;overflow:visible!important;width:100%!important;max-width:100%!important;padding:20px 28px!important}}`;
+    document.head.appendChild(st);
+    setTimeout(()=>{ window.print(); setTimeout(()=>st.remove(),1000); },200);
+  }
+
+  return (
+    <div id="mpt-br" onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.72)",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:600,padding:16,overflowY:"auto"}}>
+      <div id="mpt-sh" onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:14,width:"100%",maxWidth:740,boxShadow:"0 24px 80px rgba(0,0,0,0.35)",marginTop:8,marginBottom:24,fontFamily:"sans-serif"}}>
+
+        {/* toolbar */}
+        <div id="mpt-tb" style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 22px",borderBottom:"1px solid #e5e7eb",position:"sticky",top:0,background:"#fff",zIndex:10,borderRadius:"14px 14px 0 0"}}>
+          <div>
+            <span style={{fontWeight:700,fontSize:14,color:"#1B4332"}}>📄 Vista Previa del Boletín</span>
+            <span style={{marginLeft:10,fontSize:12,color:"#6b7280"}}>{student.nombre} · {PERIODOS[period]}</span>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <span style={{fontSize:11,color:"#9ca3af"}}>Guardar como PDF desde el diálogo</span>
+            <button onClick={doPrint} style={{background:"#1B4332",color:"#fff",border:"none",borderRadius:8,padding:"9px 20px",cursor:"pointer",fontSize:13,fontWeight:700}}>🖨️ Imprimir / PDF</button>
+            <button onClick={onClose} style={{background:"#f3f4f6",border:"none",borderRadius:8,padding:"9px 14px",cursor:"pointer",fontSize:14,color:"#6b7280",fontWeight:600}}>✕</button>
+          </div>
+        </div>
+
+        {/* content */}
+        <div style={{padding:"28px 32px"}}>
+          {/* header */}
+          <div style={{borderBottom:"3px solid #1B4332",paddingBottom:14,marginBottom:18,display:"flex",alignItems:"center",gap:14}}>
+            <div style={{width:54,height:54,borderRadius:"50%",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28}}>
+                {logoUrl?<img src={logoUrl} alt="Escudo" style={{width:54,height:54,borderRadius:"50%",objectFit:"cover"}}/>:<div style={{width:54,height:54,borderRadius:"50%",background:"linear-gradient(135deg,#0d3320,#1B4332)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28}}>🏫</div>}
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontFamily:"Georgia,serif",fontSize:22,fontWeight:700,color:"#1B4332"}}>Mis Pequeños Tesoros</div>
+              <div style={{fontSize:11,color:"#6b7280",marginTop:2}}>Boletín Académico Oficial · {PERIODOS[period]}</div>
+            </div>
+            <div style={{fontSize:11,color:"#9ca3af"}}>Fecha: {tod()}</div>
+          </div>
+
+          {/* datos */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:18,background:"#f9fbf9",borderRadius:10,padding:"11px 16px"}}>
+            {[["Estudiante",student.nombre],["Grado",student.grado],["Acudiente",student.parent_nombre||"—"]].map(([k,v])=>(
+              <div key={k}>
+                <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:3}}>{k}</div>
+                <div style={{fontSize:13,fontWeight:600}}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* tabla */}
+          <table style={{width:"100%",borderCollapse:"collapse",marginBottom:16,fontSize:12}}>
+            <thead>
+              <tr style={{background:"#1B4332",color:"#fff"}}>
+                <th style={{padding:"9px 12px",textAlign:"left"}}>Materia</th>
+                <th style={{padding:"9px 8px",textAlign:"center"}}>Nota</th>
+                <th style={{padding:"9px 8px",textAlign:"center"}}>Desempeño</th>
+                <th style={{padding:"9px 12px",textAlign:"left",width:"36%"}}>Observación del docente</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mats.map((m,i)=>{
+                const n   = notasMap[m.id];
+                const obs = (obsData?.materias||{})[m.id]||"";
+                return (
+                  <tr key={m.id} style={{background:i%2===0?"#fff":"#f9fbf9",verticalAlign:"top"}}>
+                    <td style={{padding:"9px 12px",fontWeight:600}}>
+                      {m.icono} {m.nombre}
+                      {m.docente&&<div style={{fontSize:10,color:"#9ca3af",fontWeight:400,marginTop:2}}>👩‍🏫 {m.docente}</div>}
+                    </td>
+                    <td style={{padding:"9px 8px",textAlign:"center"}}>
+                      <span style={{background:nBg(n),color:nClr(n),borderRadius:6,padding:"3px 12px",fontWeight:700,fontSize:16}}>{fmt(n)}</span>
+                    </td>
+                    <td style={{padding:"9px 8px",textAlign:"center"}}>
+                      <span style={{background:nBg(n),color:nClr(n),borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700,whiteSpace:"nowrap"}}>{lbl(n)}</span>
+                    </td>
+                    <td style={{padding:"9px 12px",fontStyle:obs?"italic":"normal",color:obs?"#374151":"#c4c4c4",fontSize:11}}>{obs||"Sin observación"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {/* promedio */}
+          <div style={{background:nBg(prom),border:"2px solid "+nClr(prom),borderRadius:12,padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:1}}>Promedio General del Período</div>
+              <div style={{fontSize:13,color:nClr(prom),fontWeight:700,marginTop:3}}>{lbl(prom)}</div>
+            </div>
+            <div style={{fontFamily:"Georgia,serif",fontSize:44,fontWeight:700,color:nClr(prom)}}>{fmt(prom)}</div>
+          </div>
+
+          {/* obs general */}
+          {obsData?.general&&(
+            <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"13px 18px",marginBottom:14}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#0369a1",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>💬 Observación General</div>
+              <p style={{fontSize:13,color:"#1e40af",margin:0,lineHeight:1.65,fontStyle:"italic"}}>"{obsData.general}"</p>
+            </div>
+          )}
+
+          {/* fortalezas / mejorar */}
+          {(obsData?.fortalezas||obsData?.mejorar)&&(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
+              {obsData.fortalezas&&(
+                <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:10,padding:"13px 16px"}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#065f46",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>⭐ Fortalezas</div>
+                  <p style={{fontSize:12,color:"#065f46",margin:0,lineHeight:1.55}}>{obsData.fortalezas}</p>
+                </div>
+              )}
+              {obsData.mejorar&&(
+                <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:"13px 16px"}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#9a3412",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>📈 Aspectos a Mejorar</div>
+                  <p style={{fontSize:12,color:"#9a3412",margin:0,lineHeight:1.55}}>{obsData.mejorar}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* firmas */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:40,paddingTop:24,borderTop:"1px solid #e5e7eb"}}>
+            {["Firma y Sello Directora","Firma Acudiente"].map(f=>(
+              <div key={f} style={{textAlign:"center"}}>
+                <div style={{height:38}}/>
+                <div style={{borderTop:"1px solid #9ca3af",paddingTop:7,fontSize:11,color:"#9ca3af"}}>{f}</div>
+              </div>
+            ))}
+          </div>
+          <p style={{marginTop:16,textAlign:"center",fontSize:10,color:"#d1d5db"}}>Generado por la plataforma académica de Mis Pequeños Tesoros · {tod()}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// PORTAL PÚBLICO DE PADRES — acceso por token en URL
+// ============================================================
+function ParentPortalPublic({token}) {
+  const [student,   setStudent]   = useState(null);
+  const [notas,     setNotas]     = useState([]);
+  const [activs,    setActivs]    = useState([]);
+  const [obs,       setObs]       = useState([]);
+  const [obsMats,   setObsMats]   = useState([]);
+  const [coms,      setComs]      = useState([]);
+  const [materias,  setMaterias]  = useState([]);
+  const [logoUrl,   setLogoUrl]   = useState(null);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState(null);
+  const [tab,       setTab]       = useState("notas");
+  const [period,    setPeriod]    = useState(0);
+  const [selectedMat,setSelectedMat]=useState(null);
+
+  useEffect(()=>{
+    async function load() {
+      try {
+        // find student by token
+        const sts = await sb(`estudiantes?parent_token=eq.${token}&activo=eq.true`);
+        if(!sts||sts.length===0){ setError("Link inválido o expirado."); setLoading(false); return; }
+        const st = sts[0];
+        setStudent(st);
+        // load all data in parallel
+        const [n,act,o,om,c,m,inst] = await Promise.all([
+          sb(`notas?estudiante_id=eq.${st.id}`),
+          sb(`actividades?estudiante_id=eq.${st.id}&order=fecha.desc`),
+          sb(`observaciones?estudiante_id=eq.${st.id}`),
+          sb(`observaciones_materia?estudiante_id=eq.${st.id}`),
+          sb(`comunicaciones?or=(estudiante_id.eq.${st.id},and(tipo.eq.grupal,grado.eq.${st.grado}))`),
+          sb(`materias?activa=eq.true&order=orden.asc`),
+          sb(`institucion?limit=1`),
+        ]);
+        setNotas(n); setActivs(act); setObs(o); setObsMats(om); setComs(c); setMaterias(m);
+        if(inst[0]?.logo_url) setLogoUrl(inst[0].logo_url);
+      } catch(e){ setError("Error cargando datos: "+e.message); }
+      finally { setLoading(false); }
+    }
+    load();
+  },[token]);
+
+  if(loading) return (
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#0d3320,#1B4332)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <div style={{textAlign:"center",color:"#fff"}}>
+        <div style={{fontSize:44,marginBottom:14}}>🏫</div>
+        <div style={{fontFamily:"Georgia,serif",fontSize:17,marginBottom:16}}>Mis Pequeños Tesoros</div>
+        <div style={{width:34,height:34,border:"3px solid rgba(255,255,255,0.3)",borderTop:"3px solid #52B788",borderRadius:"50%",animation:"spin .7s linear infinite",margin:"0 auto"}}/>
+        <div style={{marginTop:14,fontSize:12,opacity:.6}}>Cargando información...</div>
+      </div>
+    </div>
+  );
+
+  if(error) return (
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#0d3320,#1B4332)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:"rgba(255,255,255,0.1)",borderRadius:16,padding:"32px 28px",textAlign:"center",color:"#fff",maxWidth:360}}>
+        <div style={{fontSize:48,marginBottom:16}}>⚠️</div>
+        <div style={{fontFamily:"Georgia,serif",fontSize:18,marginBottom:10}}>Link no válido</div>
+        <div style={{fontSize:13,opacity:.7,lineHeight:1.5}}>{error}</div>
+        <div style={{marginTop:20,fontSize:12,opacity:.5}}>Contacta al colegio para obtener un nuevo link.</div>
+      </div>
+    </div>
+  );
+
+  // Build notasMap[periodo][materia_id]
+  const notasMap = {};
+  notas.forEach(n=>{
+    if(!notasMap[n.periodo]) notasMap[n.periodo]={};
+    notasMap[n.periodo][n.materia_id]=parseFloat(n.nota);
+  });
+  const obsMap = {};
+  obs.forEach(o=>{ obsMap[o.periodo]=o; });
+  const obsMatsMap = {};
+  obsMats.forEach(o=>{
+    if(!obsMatsMap[o.periodo]) obsMatsMap[o.periodo]={};
+    obsMatsMap[o.periodo][o.materia_id]=o.texto;
+  });
+
+  const mats      = materias.filter(m=>m.activa);
+  const pNotes    = notasMap[period+1]||{};
+  const prom      = avg(mats.map(m=>pNotes[m.id]));
+  const unreadC   = coms.filter(c=>!c.leido).length;
+
+  return (
+    <div style={{minHeight:"100vh",background:"linear-gradient(160deg,#0a2918 0%,#1B4332 40%,#2d6a4f 100%)",fontFamily:"sans-serif"}}>
+      <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}} @keyframes spin{to{transform:rotate(360deg)}}`}</style>
+
+      {/* HEADER */}
+      <div style={{background:"rgba(0,0,0,0.3)",backdropFilter:"blur(10px)",padding:"16px 22px",display:"flex",alignItems:"center",gap:14,borderBottom:"1px solid rgba(255,255,255,0.1)",position:"sticky",top:0,zIndex:50}}>
+        {logoUrl
+          ? <img src={logoUrl} alt="Escudo" style={{width:44,height:44,borderRadius:"50%",objectFit:"cover",border:"2px solid rgba(255,255,255,0.4)",flexShrink:0}}/>
+          : <div style={{width:44,height:44,borderRadius:"50%",background:"rgba(255,255,255,0.15)",border:"2px solid rgba(255,255,255,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>🏫</div>
+        }
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{color:"#fff",fontFamily:"Georgia,serif",fontSize:15,fontWeight:700}}>Mis Pequeños Tesoros</div>
+          <div style={{color:"rgba(255,255,255,0.55)",fontSize:11,marginTop:1}}>Portal de Padres de Familia</div>
+        </div>
+        <div style={{background:"rgba(82,183,136,0.2)",border:"1px solid rgba(82,183,136,0.4)",borderRadius:20,padding:"4px 12px",fontSize:11,color:"#52B788",flexShrink:0}}>🔒 Acceso privado</div>
+      </div>
+
+      {/* WELCOME CARD */}
+      <div style={{padding:"22px 20px 0",maxWidth:720,margin:"0 auto",animation:"fadeIn .4s"}}>
+        <div style={{background:"rgba(255,255,255,0.08)",backdropFilter:"blur(8px)",borderRadius:16,padding:"20px 22px",marginBottom:18,border:"1px solid rgba(255,255,255,0.12)",display:"flex",alignItems:"center",gap:14}}>
+          <div style={{width:52,height:52,borderRadius:"50%",background:"linear-gradient(135deg,#52B788,#1B4332)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold",fontSize:18,flexShrink:0}}>
+            {mkAv(student.nombre)}
+          </div>
+          <div style={{flex:1}}>
+            <div style={{color:"rgba(255,255,255,0.6)",fontSize:11,textTransform:"uppercase",letterSpacing:1,marginBottom:3}}>Información académica de</div>
+            <div style={{color:"#fff",fontFamily:"Georgia,serif",fontSize:19,fontWeight:700}}>{student.nombre}</div>
+            <div style={{color:"rgba(255,255,255,0.55)",fontSize:12,marginTop:2}}>Grado {student.grado} · Acudiente: {student.parent_nombre||"—"}</div>
+          </div>
+          <div style={{textAlign:"center",flexShrink:0}}>
+            <div style={{fontFamily:"Georgia,serif",fontSize:28,fontWeight:700,color:nClr(prom)}}>{fmt(prom)}</div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.45)"}}>Promedio {PERIODOS[period]}</div>
+          </div>
+        </div>
+
+        {/* PERIOD SELECTOR */}
+        <div style={{display:"flex",gap:6,marginBottom:16,overflowX:"auto",paddingBottom:4}}>
+          {PERIODOS.map((p,i)=>(
+            <button key={i} onClick={()=>{setPeriod(i);setSelectedMat(null);}}
+              style={{padding:"7px 14px",border:`1px solid ${period===i?"#52B788":"rgba(255,255,255,0.2)"}`,borderRadius:20,background:period===i?"rgba(82,183,136,0.25)":"rgba(255,255,255,0.05)",color:period===i?"#52B788":"rgba(255,255,255,0.6)",cursor:"pointer",fontSize:12,fontWeight:period===i?700:400,whiteSpace:"nowrap",flexShrink:0}}>
+              {p}
+            </button>
+          ))}
+        </div>
+
+        {/* TABS */}
+        <div style={{display:"flex",background:"rgba(0,0,0,0.2)",borderRadius:12,padding:4,marginBottom:20,gap:4}}>
+          {[["notas","📊 Notas"],["comunicados",`📩 Comunicados${unreadC>0?" ("+unreadC+")":""}`],["observaciones","📝 Observaciones"]].map(([t,l])=>(
+            <button key={t} onClick={()=>setTab(t)}
+              style={{flex:1,padding:"9px 0",border:"none",cursor:"pointer",fontSize:12,fontWeight:tab===t?700:400,background:tab===t?"rgba(82,183,136,0.25)":"transparent",color:tab===t?"#52B788":"rgba(255,255,255,0.55)",borderRadius:9,transition:"all .2s"}}>
+              {l}
+            </button>
+          ))}
+        </div>
+
+        {/* ── TAB NOTAS ── */}
+        {tab==="notas"&&(
+          <div style={{animation:"fadeIn .3s"}}>
+            {mats.length===0
+              ? <div style={{textAlign:"center",padding:40,color:"rgba(255,255,255,0.4)",fontSize:13}}>Sin materias registradas.</div>
+              : (
+                <div>
+                  {/* promedio card */}
+                  <div style={{background:nBg(prom),border:"2px solid "+nClr(prom),borderRadius:14,padding:"16px 20px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:1}}>Promedio General · {PERIODOS[period]}</div>
+                      <div style={{fontSize:13,color:nClr(prom),fontWeight:700,marginTop:3}}>{lbl(prom)}</div>
+                    </div>
+                    <div style={{fontFamily:"Georgia,serif",fontSize:40,fontWeight:700,color:nClr(prom)}}>{fmt(prom)}</div>
+                  </div>
+
+                  {/* MATERIAS — clickeables */}
+                  <div style={{fontSize:11,color:"rgba(255,255,255,0.45)",textAlign:"center",marginBottom:10,letterSpacing:1}}>
+                    TOCA UNA MATERIA PARA VER SUS ACTIVIDADES
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:16}}>
+                    {mats.map(m=>{
+                      const n        = pNotes[m.id];
+                      const matActs  = activs.filter(a=>a.materia_id===m.id&&a.periodo===period+1);
+                      const selected = selectedMat===m.id;
+                      return (
+                        <div key={m.id} onClick={()=>setSelectedMat(selected?null:m.id)}
+                          style={{background:selected?"rgba(82,183,136,0.2)":"rgba(255,255,255,0.08)",borderRadius:12,padding:"14px 12px",textAlign:"center",border:`1px solid ${selected?"#52B788":"rgba(255,255,255,0.1)"}`,cursor:"pointer",transition:"all .2s"}}>
+                          <div style={{fontSize:24,marginBottom:5}}>{m.icono}</div>
+                          <div style={{fontSize:11,color:"rgba(255,255,255,0.6)",marginBottom:6,fontWeight:500}}>{m.nombre}</div>
+                          <div style={{fontFamily:"Georgia,serif",fontSize:26,fontWeight:700,color:nClr(n)}}>{fmt(n)}</div>
+                          <div style={{fontSize:10,color:nClr(n),fontWeight:600,marginTop:2}}>{lbl(n)}</div>
+                          {matActs.length>0&&<div style={{fontSize:9,color:"rgba(255,255,255,0.4)",marginTop:5}}>📋 {matActs.length} actividad(es)</div>}
+                          {m.docente&&<div style={{fontSize:9,color:"rgba(255,255,255,0.35)",marginTop:2}}>👩‍🏫 {m.docente}</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* DETALLE ACTIVIDADES DE LA MATERIA SELECCIONADA */}
+                  {selectedMat&&(()=>{
+                    const mat     = mats.find(m=>m.id===selectedMat);
+                    const matActs = activs.filter(a=>a.materia_id===selectedMat&&a.periodo===period+1);
+                    const matProm = avgPonderado(matActs);
+
+                    // agrupar por semana
+                    const porSemana={};
+                    [...matActs].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)).forEach(a=>{
+                      const sem=semanaLabel(a.fecha);
+                      if(!porSemana[sem]) porSemana[sem]=[];
+                      porSemana[sem].push(a);
+                    });
+
+                    return(
+                      <div style={{background:"rgba(255,255,255,0.06)",borderRadius:14,marginBottom:16,overflow:"hidden",border:"1px solid rgba(82,183,136,0.3)",animation:"fadeIn .25s"}}>
+                        {/* header materia */}
+                        <div style={{padding:"14px 18px",background:"rgba(82,183,136,0.15)",display:"flex",alignItems:"center",gap:12,borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+                          <span style={{fontSize:26}}>{mat.icono}</span>
+                          <div style={{flex:1}}>
+                            <div style={{color:"#fff",fontWeight:700,fontSize:15}}>{mat.nombre}</div>
+                            <div style={{color:"rgba(255,255,255,0.5)",fontSize:11}}>
+                              {mat.docente?`👩‍🏫 ${mat.docente} · `:""}{matActs.length} actividad(es) · {PERIODOS[period]}
+                            </div>
+                          </div>
+                          <div style={{textAlign:"right"}}>
+                            <div style={{fontFamily:"Georgia,serif",fontSize:26,fontWeight:700,color:nClr(matProm)}}>{fmt(matProm)}</div>
+                            <div style={{fontSize:9,color:"rgba(255,255,255,0.4)"}}>Prom. ponderado</div>
+                          </div>
+                        </div>
+
+                        {matActs.length===0?(
+                          <div style={{padding:"20px 18px",textAlign:"center",color:"rgba(255,255,255,0.35)",fontSize:13}}>
+                            Sin actividades registradas en {PERIODOS[period]}
+                          </div>
+                        ):(
+                          <div style={{padding:"14px 18px"}}>
+                            {/* resumen tipos */}
+                            <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}}>
+                              {Object.entries(ACT_TIPOS).map(([tipo,{color,bg,icon}])=>{
+                                const ta=matActs.filter(a=>a.tipo===tipo);
+                                if(!ta.length) return null;
+                                const ta_avg=avg(ta.map(a=>parseFloat(a.nota)));
+                                return(
+                                  <div key={tipo} style={{background:"rgba(255,255,255,0.07)",borderRadius:9,padding:"6px 10px",fontSize:11,display:"flex",alignItems:"center",gap:5,border:"1px solid rgba(255,255,255,0.08)"}}>
+                                    <span>{icon}</span>
+                                    <span style={{color:"rgba(255,255,255,0.7)"}}>{tipo}</span>
+                                    <span style={{color:nClr(ta_avg),fontWeight:700}}>{fmt(ta_avg)}</span>
+                                    <span style={{color:"rgba(255,255,255,0.35)"}}>({ta.length})</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* actividades por semana */}
+                            {Object.entries(porSemana).map(([semana,semActs])=>{
+                              const semAvg=avg(semActs.map(a=>parseFloat(a.nota)));
+                              return(
+                                <div key={semana} style={{marginBottom:14}}>
+                                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                                    <div style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.4)",textTransform:"uppercase",letterSpacing:1}}>📅 {semana}</div>
+                                    <div style={{height:1,flex:1,background:"rgba(255,255,255,0.07)"}}/>
+                                    <div style={{fontFamily:"Georgia,serif",fontSize:13,fontWeight:700,color:nClr(semAvg)}}>{fmt(semAvg)}</div>
+                                  </div>
+                                  {semActs.map(a=>{
+                                    const {color,bg,icon}=ACT_TIPOS[a.tipo]||{color:"#6b7280",bg:"rgba(255,255,255,0.05)",icon:"📌"};
+                                    return(
+                                      <div key={a.id} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"10px 12px",borderRadius:10,marginBottom:6,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)"}}>
+                                        <span style={{fontSize:16,flexShrink:0,marginTop:1}}>{icon}</span>
+                                        <div style={{flex:1,minWidth:0}}>
+                                          <div style={{color:"#fff",fontWeight:600,fontSize:13}}>{a.titulo}</div>
+                                          <div style={{display:"flex",gap:8,alignItems:"center",marginTop:4,flexWrap:"wrap"}}>
+                                            <span style={{background:"rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.6)",borderRadius:9,padding:"1px 8px",fontSize:10,fontWeight:600}}>{a.tipo}</span>
+                                            <span style={{color:"rgba(255,255,255,0.35)",fontSize:10}}>📅 {a.fecha}</span>
+                                            {a.observacion&&<span style={{color:"rgba(255,255,255,0.45)",fontSize:10,fontStyle:"italic"}}>· {a.observacion}</span>}
+                                          </div>
+                                        </div>
+                                        <div style={{flexShrink:0,textAlign:"right"}}>
+                                          <span style={{background:nBg(parseFloat(a.nota)),color:nClr(parseFloat(a.nota)),borderRadius:8,padding:"4px 12px",fontWeight:700,fontSize:16,display:"inline-block"}}>{fmt(parseFloat(a.nota))}</span>
+                                          <div style={{fontSize:9,color:nClr(parseFloat(a.nota)),fontWeight:600,marginTop:2}}>{lbl(parseFloat(a.nota))}</div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* evolución */}
+                  <div style={{background:"rgba(255,255,255,0.06)",borderRadius:12,padding:"16px 18px",border:"1px solid rgba(255,255,255,0.1)"}}>
+                    <div style={{color:"rgba(255,255,255,0.7)",fontWeight:700,fontSize:13,marginBottom:12}}>📈 Evolución por Período</div>
+                    <div style={{overflowX:"auto"}}>
+                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:320}}>
+                        <thead>
+                          <tr>
+                            <th style={{padding:"7px 10px",textAlign:"left",color:"rgba(255,255,255,0.5)",fontWeight:600}}>Materia</th>
+                            {PERIODOS.map(p=><th key={p} style={{padding:"7px 8px",textAlign:"center",color:"rgba(255,255,255,0.5)",fontWeight:600,whiteSpace:"nowrap"}}>{p}</th>)}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {mats.map(m=>(
+                            <tr key={m.id} style={{borderTop:"1px solid rgba(255,255,255,0.06)"}}>
+                              <td style={{padding:"8px 10px",color:"rgba(255,255,255,0.8)",fontWeight:500}}>{m.icono} {m.nombre}</td>
+                              {[1,2,3,4].map(p=>{
+                                const n=(notasMap[p]||{})[m.id];
+                                return <td key={p} style={{padding:"8px 6px",textAlign:"center"}}>
+                                  <span style={{background:nBg(n),color:nClr(n),borderRadius:6,padding:"2px 8px",fontWeight:700,fontSize:12}}>{fmt(n)}</span>
+                                </td>;
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )
+            }
+          </div>
+        )}
+
+        {/* ── TAB COMUNICADOS ── */}
+        {tab==="comunicados"&&(
+          <div style={{animation:"fadeIn .3s"}}>
+            {coms.length===0
+              ? <div style={{textAlign:"center",padding:40,color:"rgba(255,255,255,0.4)",fontSize:13}}>No hay comunicados aún.</div>
+              : coms.map(c=>(
+                <div key={c.id} style={{background:"rgba(255,255,255,0.08)",borderRadius:12,padding:"15px 18px",marginBottom:10,border:`1px solid ${c.tipo==="grupal"?"rgba(82,183,136,0.3)":"rgba(212,160,23,0.3)"}`}}>
+                  <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+                    <div style={{width:36,height:36,borderRadius:9,background:c.tipo==="grupal"?"rgba(82,183,136,0.2)":"rgba(212,160,23,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
+                      {c.tipo==="grupal"?"👥":"👤"}
+                    </div>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap",marginBottom:5}}>
+                        <span style={{color:"rgba(255,255,255,0.5)",fontSize:10,textTransform:"uppercase",letterSpacing:1}}>{c.tipo==="grupal"?`Comunicado grado ${c.grado}`:"Comunicado personal"}</span>
+                        <span style={{background:"rgba(99,102,241,0.25)",color:"#a5b4fc",fontSize:10,padding:"1px 7px",borderRadius:9,fontWeight:600}}>{c.area}</span>
+                        {!c.leido&&<span style={{background:"#DC2626",color:"#fff",fontSize:9,padding:"2px 6px",borderRadius:9,fontWeight:700}}>NUEVO</span>}
+                      </div>
+                      <div style={{color:"#fff",fontSize:13,lineHeight:1.55}}>{c.texto}</div>
+                      <div style={{color:"rgba(255,255,255,0.35)",fontSize:11,marginTop:6}}>📅 {c.created_at?.slice(0,10)} · ✍️ {c.autor}</div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+        )}
+
+        {/* ── TAB OBSERVACIONES ── */}
+        {tab==="observaciones"&&(
+          <div style={{animation:"fadeIn .3s"}}>
+            {[0,1,2,3].map(pi=>{
+              const od  = obsMap[pi+1];
+              const mOb = obsMatsMap[pi+1]||{};
+              const hasData = od?.general||od?.fortalezas||od?.mejorar||Object.values(mOb).some(v=>v);
+              if(!hasData) return null;
+              return (
+                <div key={pi} style={{background:"rgba(255,255,255,0.07)",borderRadius:14,marginBottom:14,overflow:"hidden",border:"1px solid rgba(255,255,255,0.1)"}}>
+                  <div style={{padding:"12px 18px",background:"rgba(0,0,0,0.2)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{color:"#fff",fontWeight:700,fontSize:13}}>{PERIODOS[pi]}</span>
+                  </div>
+                  <div style={{padding:"16px 18px"}}>
+                    {od?.general&&(
+                      <div style={{marginBottom:12}}>
+                        <div style={{fontSize:10,fontWeight:700,color:"#93c5fd",textTransform:"uppercase",letterSpacing:1,marginBottom:5}}>💬 Observación General</div>
+                        <p style={{fontSize:13,color:"rgba(255,255,255,0.85)",fontStyle:"italic",lineHeight:1.55,margin:0}}>"{od.general}"</p>
+                      </div>
+                    )}
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:od&&Object.values(mOb).some(v=>v)?12:0}}>
+                      {od?.fortalezas&&<div style={{background:"rgba(16,185,129,0.1)",borderRadius:9,padding:"10px 12px",border:"1px solid rgba(16,185,129,0.2)"}}>
+                        <div style={{fontSize:9,fontWeight:700,color:"#6ee7b7",textTransform:"uppercase",letterSpacing:1,marginBottom:5}}>⭐ Fortalezas</div>
+                        <p style={{fontSize:12,color:"#a7f3d0",margin:0,lineHeight:1.4}}>{od.fortalezas}</p>
+                      </div>}
+                      {od?.mejorar&&<div style={{background:"rgba(245,158,11,0.1)",borderRadius:9,padding:"10px 12px",border:"1px solid rgba(245,158,11,0.2)"}}>
+                        <div style={{fontSize:9,fontWeight:700,color:"#fcd34d",textTransform:"uppercase",letterSpacing:1,marginBottom:5}}>📈 A mejorar</div>
+                        <p style={{fontSize:12,color:"#fde68a",margin:0,lineHeight:1.4}}>{od.mejorar}</p>
+                      </div>}
+                    </div>
+                    {Object.entries(mOb).filter(([,v])=>v).length>0&&(
+                      <div>
+                        <div style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.4)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Por materia</div>
+                        {Object.entries(mOb).filter(([,v])=>v).map(([mid,txt])=>{
+                          const mat=mats.find(m=>m.id===mid);
+                          if(!mat) return null;
+                          return <div key={mid} style={{display:"flex",gap:10,marginBottom:8,alignItems:"flex-start"}}>
+                            <span style={{fontSize:16,flexShrink:0}}>{mat.icono}</span>
+                            <div>
+                              <div style={{fontSize:11,fontWeight:600,color:"rgba(255,255,255,0.6)",marginBottom:2}}>{mat.nombre}</div>
+                              <div style={{fontSize:12,color:"rgba(255,255,255,0.8)",fontStyle:"italic"}}>{txt}</div>
+                            </div>
+                          </div>;
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {![0,1,2,3].some(pi=>{ const od=obsMap[pi+1]; const mOb=obsMatsMap[pi+1]||{}; return od?.general||od?.fortalezas||od?.mejorar||Object.values(mOb).some(v=>v); })&&(
+              <div style={{textAlign:"center",padding:40,color:"rgba(255,255,255,0.4)",fontSize:13}}>Sin observaciones registradas aún.</div>
+            )}
+          </div>
+        )}
+
+        <div style={{height:32}}/>
+        <div style={{textAlign:"center",fontSize:10,color:"rgba(255,255,255,0.25)",paddingBottom:20}}>
+          Mis Pequeños Tesoros · Portal de Padres · {tod()}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// PORTAL PADRES (vista interna desde Dashboard)
+// ============================================================
+function ParentPortal({student, notasPorPeriodo, obsTotal, materias, comunicaciones, onBack}) {
+  const [tab,setTab]=useState("notas");
+  const mats = materias.filter(m=>m.activa);
+  const myComs = comunicaciones.filter(c=>c.estudiante_id===student.id||(c.tipo==="grupal"&&c.grado===student.grado));
+  return (
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#0d3320,#1B4332,#2d6a4f)",fontFamily:"sans-serif"}}>
+      <div style={{background:"rgba(0,0,0,0.25)",padding:"16px 22px",display:"flex",alignItems:"center",gap:12}}>
+        <div style={{width:40,height:40,borderRadius:"50%",background:"#52B788",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold",fontSize:13}}>{mkAv(student.nombre)}</div>
+        <div>
+          <div style={{color:"#fff",fontWeight:"bold",fontSize:15}}>{student.nombre}</div>
+          <div style={{color:"rgba(255,255,255,0.55)",fontSize:11}}>Portal de Padres · Grado {student.grado}</div>
+        </div>
+        <button onClick={onBack} style={{marginLeft:"auto",background:"rgba(255,255,255,0.12)",color:"#fff",border:"1px solid rgba(255,255,255,0.25)",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12}}>← Volver</button>
+      </div>
+      <div style={{display:"flex",background:"rgba(0,0,0,0.18)",padding:"0 22px"}}>
+        {[["notas","📊 Notas"],["comunicados","📩 Comunicados"]].map(([t,l])=>(
+          <button key={t} onClick={()=>setTab(t)} style={{padding:"10px 18px",border:"none",cursor:"pointer",fontSize:13,background:"transparent",color:tab===t?"#52B788":"rgba(255,255,255,0.55)",borderBottom:tab===t?"2px solid #52B788":"2px solid transparent"}}>{l}</button>
+        ))}
+      </div>
+      <div style={{padding:22,maxWidth:680,margin:"0 auto"}}>
+        {tab==="notas"&&(
+          <div>
+            <h3 style={{color:"#fff",marginBottom:18,fontFamily:"Georgia,serif"}}>Historial de Notas por Período</h3>
+            {[0,1,2,3].map(pi=>{
+              const pNotes = notasPorPeriodo[pi+1]||{};
+              const hasN   = Object.keys(pNotes).length>0;
+              const prom   = avg(mats.map(m=>pNotes[m.id]));
+              return (
+                <div key={pi} style={{background:"rgba(255,255,255,0.07)",borderRadius:12,marginBottom:14,overflow:"hidden",border:"1px solid rgba(255,255,255,0.1)"}}>
+                  <div style={{padding:"11px 18px",background:"rgba(0,0,0,0.2)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{color:"#fff",fontWeight:"bold"}}>{PERIODOS[pi]}</span>
+                    {hasN&&<span style={{color:nClr(prom),fontWeight:"bold"}}>Prom: {fmt(prom)}</span>}
+                  </div>
+                  {hasN?(
+                    <div style={{padding:"12px 18px",display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:8}}>
+                      {mats.map(m=>(
+                        <div key={m.id} style={{background:"rgba(255,255,255,0.05)",borderRadius:8,padding:"10px",textAlign:"center"}}>
+                          <div style={{fontSize:18,marginBottom:2}}>{m.icono}</div>
+                          <div style={{color:"rgba(255,255,255,0.5)",fontSize:10,marginBottom:3}}>{m.nombre}</div>
+                          <div style={{color:nClr(pNotes[m.id]),fontWeight:"bold",fontSize:20}}>{fmt(pNotes[m.id])}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ):(
+                    <div style={{padding:"14px 18px",color:"rgba(255,255,255,0.35)",fontSize:13}}>Sin notas registradas.</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {tab==="comunicados"&&(
+          <div>
+            <h3 style={{color:"#fff",marginBottom:18}}>Comunicados del Colegio</h3>
+            {myComs.length===0&&<p style={{color:"rgba(255,255,255,0.4)"}}>Sin comunicados aún.</p>}
+            {myComs.map(c=>(
+              <div key={c.id} style={{background:"rgba(255,255,255,0.07)",borderRadius:12,padding:"15px 18px",marginBottom:10,border:`1px solid ${c.tipo==="grupal"?"rgba(82,183,136,0.3)":"rgba(212,160,23,0.3)"}`}}>
+                <div style={{color:"rgba(255,255,255,0.45)",fontSize:10,marginBottom:4}}>{c.tipo==="grupal"?`Comunicado grado ${c.grado}`:"Comunicado personal"} · {c.area}</div>
+                <div style={{color:"#fff",fontSize:13,lineHeight:1.5}}>{c.texto}</div>
+                <div style={{color:"rgba(255,255,255,0.35)",fontSize:11,marginTop:6}}>📅 {c.created_at?.slice(0,10)} · ✍️ {c.autor}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// UI HELPERS
+// ============================================================
+function Overlay({onClose,children,wide=false}) {
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:18,padding:28,width:"100%",maxWidth:wide?680:500,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 24px 80px rgba(0,0,0,0.28)"}}>
+        {children}
+      </div>
+    </div>
+  );
+}
+function MHead({title,onClose}) {
+  return (
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+      <h3 style={{fontFamily:"Georgia,serif",fontSize:19,margin:0,color:"#1B4332"}}>{title}</h3>
+      <button onClick={onClose} style={{background:"none",border:"none",fontSize:24,cursor:"pointer",color:"#9ca3af",lineHeight:1}}>×</button>
+    </div>
+  );
+}
+function Lbl({c}) { return <label style={{fontFamily:"sans-serif",fontSize:11,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",display:"block",marginBottom:5}}>{c}</label>; }
+function Inp({value,onChange,placeholder,type="text"}) {
+  return <input type={type} value={value} onChange={onChange} placeholder={placeholder}
+    style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid #e5e7eb",fontSize:13,fontFamily:"sans-serif",boxSizing:"border-box"}}/>;
+}
+function PBtn({onClick,children,color="#1B4332",disabled=false}) {
+  return <button onClick={onClick} disabled={disabled}
+    style={{padding:"11px 18px",border:"none",borderRadius:10,background:disabled?"#9ca3af":color,color:"#fff",cursor:disabled?"not-allowed":"pointer",fontFamily:"sans-serif",fontSize:13,fontWeight:700,opacity:disabled?0.7:1}}>{children}</button>;
+}
+function Spinner() {
+  return <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"80px 0",gap:16}}>
+    <div style={{width:44,height:44,border:"4px solid #e5e7eb",borderTop:"4px solid #1B4332",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+    <div style={{fontFamily:"sans-serif",fontSize:14,color:"#6b7280"}}>Conectando con Supabase...</div>
+  </div>;
+}
+
+// ============================================================
+// MAIN APP — auth gate + parent token detection
+// ============================================================
+function App() {
+  const [session,      setSession]      = useState(undefined);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [parentToken,  setParentToken]  = useState(null);
+
+  useEffect(()=>{
+    // Check URL for parent token: ?token=xxx or /padre/xxx
+    const params = new URLSearchParams(window.location.search);
+    const urlToken = params.get("token") || params.get("padre");
+    // Also check hash: #token=xxx
+    const hashParams = new URLSearchParams(window.location.hash.replace("#",""));
+    const hashToken = hashParams.get("token");
+    const token = urlToken || hashToken;
+    if(token) { setParentToken(token); setCheckingAuth(false); return; }
+    getSession().then(s=>{ setSession(s); setCheckingAuth(false); });
+  },[]);
+
+  async function handleLogin(s) { setSession(s); }
+  async function handleLogout() {
+    if(session?.access_token) await signOut(session.access_token).catch(()=>{});
+    localStorage.removeItem("mpt_session");
+    setSession(null);
+  }
+
+  if(checkingAuth) return (
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#0d3320,#1B4332)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <div style={{textAlign:"center",color:"#fff"}}>
+        <div style={{fontSize:48,marginBottom:16}}>🏫</div>
+        <div style={{fontFamily:"Georgia,serif",fontSize:18,marginBottom:16}}>Mis Pequeños Tesoros</div>
+        <div style={{width:36,height:36,border:"3px solid rgba(255,255,255,0.3)",borderTop:"3px solid #fff",borderRadius:"50%",animation:"spin .7s linear infinite",margin:"0 auto"}}/>
+      </div>
+    </div>
+  );
+
+  // Parent portal via token
+  if(parentToken) return <ParentPortalPublic token={parentToken}/>;
+
+  // Not logged in → show login
+  if(!session) return <LoginScreen onLogin={handleLogin}/>;
+  return <Dashboard onLogout={handleLogout}/>;
+}
+
+// ============================================================
+// DASHBOARD — full panel (all hooks here, no conditionals before them)
+// ============================================================
+function Dashboard({onLogout}) {
+  // ── data from supabase ────────────────────────────────────
+  const [materias,      setMaterias]      = useState([]);
+  const [estudiantes,   setEstudiantes]   = useState([]);
+  const [notas,         setNotas]         = useState([]);
+  const [actividades,   setActividades]   = useState([]);
+  const [observaciones, setObservaciones] = useState([]);
+  const [obsMaterias,   setObsMaterias]   = useState([]);
+  const [comunicaciones,setComunicaciones]= useState([]);
+  const [loading,       setLoading]       = useState(true);
+  const [dbError,       setDbError]       = useState(null);
+
+  // ── ui state ──────────────────────────────────────────────
+  const [tab,      setTab]      = useState("Dashboard");
+  const [period,   setPeriod]   = useState(0);
+  const [gradeF,   setGradeF]   = useState("Todos");
+  const [logoUrl,  setLogoUrl]  = useState(null);
+  const [portal,   setPortal]   = useState(null);
+  const [toast,    setToast]    = useState(null);
+  const [saving,   setSaving]   = useState(false);
+
+  // ── modals ────────────────────────────────────────────────
+  const [mNota,    setMNota]    = useState(false);
+  const [mComent,  setMComent]  = useState(false);
+  const [mStudent, setMStudent] = useState(false);
+  const [mMateria, setMMateria] = useState(null);
+  const [mDelMat,  setMDelMat]  = useState(null);
+  const [mBoletin, setMBoletin] = useState(null);
+  const [mLink,    setMLink]    = useState(null);
+  const [mObs,     setMObs]     = useState(false);
+  const [mAct,     setMAct]     = useState(false);  // modal nueva actividad
+  const [mDelAct,  setMDelAct]  = useState(null);   // confirm delete actividad
+  const [boletinV, setBoletinV] = useState(null);
+
+  // ── reporte states ────────────────────────────────────────
+  const [reporteActivo,    setReporteActivo]    = useState("seguimiento");
+  const [reporteEstudiante,setReporteEstudiante]= useState("");
+  const [reporteGrado,     setReporteGrado]     = useState("");
+  const [reporteMateria,   setReporteMateria]   = useState("");
+  const [reportePeriodo,   setReportePeriodo]   = useState(0);
+
+  // ── forms ─────────────────────────────────────────────────
+  const [selSt,    setSelSt]    = useState(null);
+  const [noteEd,   setNoteEd]   = useState({});
+  const [obsEdit,  setObsEdit]  = useState({general:"",fortalezas:"",mejorar:"",materias:{}});
+  const [newCom,   setNewCom]   = useState({tipo:"individual",area:"General",texto:"",grado:"3A",estudiante_id:""});
+  const [newSt,    setNewSt]    = useState({nombre:"",grado:"3A",parent_nombre:"",parent_telefono:"",parent_email:""});
+  const [fMat,     setFMat]     = useState({nombre:"",icono:"📚",docente:"",color:"#3B82F6",activa:true});
+  const [newAct,   setNewAct]   = useState({estudiante_id:"",materia_id:"",tipo:"Tarea",titulo:"",nota:"",fecha:tod(),observacion:"",periodo:1});
+
+  const logoRef = useRef();
+  const pk      = period+1;
+  const actMats = materias.filter(m=>m.activa);
+  const filtSts = gradeF==="Todos"?estudiantes:estudiantes.filter(s=>s.grado===gradeF);
+  const unread  = comunicaciones.filter(c=>!c.leido).length;
+
+  function notify(msg,color="#52B788") { setToast({msg,color}); setTimeout(()=>setToast(null),3200); }
+
+  // ── PRINT REPORTE ─────────────────────────────────────────
+  function printReporte() {
+    const el = document.getElementById("reporte-print");
+    if (!el) return;
+    const st = document.createElement("style");
+    st.id = "rpt-ps";
+    st.innerHTML = `@media print{body>*:not(#rpt-root){display:none!important}#rpt-root{position:fixed!important;inset:0!important;background:#fff!important;z-index:99999!important;padding:24px!important;overflow:visible!important}}`;
+    document.head.appendChild(st);
+    const root = document.createElement("div");
+    root.id = "rpt-root";
+    root.innerHTML = el.innerHTML;
+    document.body.appendChild(root);
+    setTimeout(()=>{
+      window.print();
+      setTimeout(()=>{ root.remove(); st.remove(); },1000);
+    },200);
+  }
+
+  // ── LOAD ALL DATA ─────────────────────────────────────────
+  const loadAll = useCallback(async()=>{
+    setLoading(true); setDbError(null);
+    try {
+      const [m,e,n,act,o,om,c,inst] = await Promise.all([
+        GET("materias","order=orden.asc"),
+        GET("estudiantes","activo=eq.true"),
+        GET("notas"),
+        GET("actividades","order=fecha.desc"),
+        GET("observaciones"),
+        GET("observaciones_materia","order=updated_at.asc"),
+        GET("comunicaciones","order=created_at.desc"),
+        GET("institucion","limit=1"),
+      ]);
+      setMaterias(m); setEstudiantes(e); setNotas(n); setActividades(act);
+      setObservaciones(o); setObsMaterias(om); setComunicaciones(c);
+      if(inst[0]?.logo_url) setLogoUrl(inst[0].logo_url);
+    } catch(err) {
+      setDbError(err.message);
+    } finally { setLoading(false); }
+  },[]);
+
+  useEffect(()=>{ loadAll(); },[loadAll]);
+
+  // ── COMPUTED ──────────────────────────────────────────────
+  // notasMap[estudiante_id][periodo][materia_id] = nota
+  const notasMap = {};
+  notas.forEach(n=>{
+    if(!notasMap[n.estudiante_id]) notasMap[n.estudiante_id]={};
+    if(!notasMap[n.estudiante_id][n.periodo]) notasMap[n.estudiante_id][n.periodo]={};
+    notasMap[n.estudiante_id][n.periodo][n.materia_id]=parseFloat(n.nota);
+  });
+
+  // obsMap[estudiante_id][periodo] = {general,fortalezas,mejorar}
+  const obsMap = {};
+  observaciones.forEach(o=>{ if(!obsMap[o.estudiante_id])obsMap[o.estudiante_id]={}; obsMap[o.estudiante_id][o.periodo]=o; });
+
+  // obsMateriaMap[estudiante_id][periodo][materia_id] = texto
+  const obsMateriaMap = {};
+  obsMaterias.forEach(o=>{
+    if(!obsMateriaMap[o.estudiante_id])obsMateriaMap[o.estudiante_id]={};
+    if(!obsMateriaMap[o.estudiante_id][o.periodo])obsMateriaMap[o.estudiante_id][o.periodo]={};
+    obsMateriaMap[o.estudiante_id][o.periodo][o.materia_id]=o.texto;
+  });
+
+  function getNotasPeriodo(stId,p){ return notasMap[stId]?.[p]||{}; }
+  function getAvg(stId,p){ return avg(actMats.map(m=>getNotasPeriodo(stId,p)[m.id])); }
+
+  const atRisk = estudiantes.filter(s=>{ const a=getAvg(s.id,pk); return a!==null&&a<7; });
+  function overallAvg(){ const avgs=estudiantes.map(s=>getAvg(s.id,pk)).filter(a=>a!==null); return avg(avgs); }
+
+  // ── LOGO → sube a Supabase Storage y guarda URL ──────────
+  async function handleLogo(e) {
+    const f = e.target.files[0];
+    if (!f) return;
+    notify("⏳ Subiendo escudo...","#D4A017");
+    try {
+      // 1. Upload to Storage
+      const ext      = f.name.split(".").pop();
+      const fileName = `escudo.${ext}`;
+      const uploadRes = await fetch(
+        `${SUPA_URL}/storage/v1/object/Institucional/${fileName}`,
+        { method:"POST", headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`,"Content-Type":f.type,"x-upsert":"true"}, body:f }
+      );
+      if (!uploadRes.ok) throw new Error("Error subiendo imagen");
+
+      // 2. Get public URL
+      const publicUrl = `${SUPA_URL}/storage/v1/object/public/Institucional/${fileName}`;
+
+      // 3. Save URL in institucion table
+      await PATCH("institucion","id=not.is.null",{logo_url:publicUrl});
+
+      setLogoUrl(publicUrl);
+      notify("✅ Escudo guardado permanentemente");
+    } catch(err) {
+      notify("❌ Error: "+err.message,"#dc2626");
+    }
+  }
+
+  // ── ACTIVIDADES ───────────────────────────────────────────
+  async function saveAct() {
+    if(!newAct.estudiante_id){notify("⚠️ Selecciona un estudiante","#F59E0B");return;}
+    if(!newAct.materia_id){notify("⚠️ Selecciona una materia","#F59E0B");return;}
+    if(!newAct.titulo.trim()){notify("⚠️ Escribe el título","#F59E0B");return;}
+    if(newAct.nota===""||isNaN(parseFloat(newAct.nota))){notify("⚠️ Ingresa la nota","#F59E0B");return;}
+    setSaving(true);
+    try {
+      await POST("actividades",{
+        estudiante_id:newAct.estudiante_id,
+        materia_id:newAct.materia_id,
+        periodo:parseInt(newAct.periodo),
+        tipo:newAct.tipo,
+        titulo:newAct.titulo,
+        nota:parseFloat(newAct.nota),
+        fecha:newAct.fecha,
+        observacion:newAct.observacion,
+      });
+      await loadAll();
+      setNewAct({estudiante_id:"",materia_id:"",tipo:"Tarea",titulo:"",nota:"",fecha:tod(),observacion:"",periodo:period+1});
+      setMAct(false);
+      notify("✅ Actividad guardada");
+    } catch(e){ notify("❌ Error: "+e.message,"#dc2626"); }
+    finally{ setSaving(false); }
+  }
+  async function deleteAct() {
+    setSaving(true);
+    try {
+      await DELETE("actividades",`id=eq.${mDelAct.id}`);
+      await loadAll(); setMDelAct(null);
+      notify("🗑️ Actividad eliminada","#EF4444");
+    } catch(e){ notify("❌ Error: "+e.message,"#dc2626"); }
+    finally{ setSaving(false); }
+  }
+
+  // helper: actividades de un estudiante en un período
+  function getActsEstPeriodo(stId,p){ return actividades.filter(a=>a.estudiante_id===stId&&a.periodo===p); }
+  function getPromPonderado(stId,p,matId){ return avgPonderado(getActsEstPeriodo(stId,p).filter(a=>!matId||a.materia_id===matId)); }
+
+  // ── MATERIAS ─────────────────────────────────────────────
+  async function saveMat() {
+    if(!fMat.nombre.trim()){notify("⚠️ El nombre es obligatorio","#F59E0B");return;}
+    setSaving(true);
+    try {
+      if(mMateria==="new") {
+        const orden = materias.length+1;
+        await POST("materias",{...fMat,orden});
+      } else {
+        await PATCH("materias",`id=eq.${mMateria.id}`,fMat);
+      }
+      await loadAll();
+      setMMateria(null);
+      notify(mMateria==="new"?"✅ Materia agregada":"✅ Materia actualizada");
+    } catch(e){ notify("❌ Error: "+e.message,"#dc2626"); }
+    finally{ setSaving(false); }
+  }
+  async function deleteMat() {
+    setSaving(true);
+    try {
+      await DELETE("materias",`id=eq.${mDelMat.id}`);
+      await loadAll(); setMDelMat(null);
+      notify("🗑️ Materia eliminada","#EF4444");
+    } catch(e){ notify("❌ Error: "+e.message,"#dc2626"); }
+    finally{ setSaving(false); }
+  }
+  async function toggleMat(m) {
+    try {
+      await PATCH("materias",`id=eq.${m.id}`,{activa:!m.activa});
+      await loadAll();
+    } catch(e){ notify("❌ Error: "+e.message,"#dc2626"); }
+  }
+
+  // ── ESTUDIANTES ──────────────────────────────────────────
+  async function addStudent() {
+    if(!newSt.nombre.trim()){notify("⚠️ El nombre es obligatorio","#F59E0B");return;}
+    setSaving(true);
+    try {
+      await POST("estudiantes",{...newSt,avatar:mkAv(newSt.nombre)});
+      await loadAll();
+      setNewSt({nombre:"",grado:"3A",parent_nombre:"",parent_telefono:"",parent_email:""});
+      setMStudent(false);
+      notify("✅ Estudiante registrado");
+    } catch(e){ notify("❌ Error: "+e.message,"#dc2626"); }
+    finally{ setSaving(false); }
+  }
+
+  // ── NOTAS ─────────────────────────────────────────────────
+  async function saveNotes() {
+    setSaving(true);
+    try {
+      const upserts = Object.entries(noteEd)
+        .filter(([,v])=>v!==undefined&&v!=="")
+        .map(([materia_id,nota])=>({ estudiante_id:selSt.id, materia_id, periodo:pk, nota:parseFloat(nota) }));
+      if(upserts.length>0) await UPSERT("notas",upserts,"estudiante_id,materia_id,periodo");
+      await loadAll();
+      setMNota(false); setNoteEd({});
+      notify("✅ Notas guardadas en Supabase");
+    } catch(e){ notify("❌ Error guardando notas: "+e.message,"#dc2626"); }
+    finally{ setSaving(false); }
+  }
+
+  // ── OBSERVACIONES ─────────────────────────────────────────
+  function openObs(student) {
+    const existing = obsMap[student.id]?.[pk]||{};
+    const matExist = obsMateriaMap[student.id]?.[pk]||{};
+    setObsEdit({ general:existing.general||"", fortalezas:existing.fortalezas||"", mejorar:existing.mejorar||"", materias:{...matExist} });
+    setSelSt(student); setMObs(true);
+  }
+  async function saveObs() {
+    setSaving(true);
+    try {
+      // general obs
+      await UPSERT("observaciones",[{estudiante_id:selSt.id,periodo:pk,general:obsEdit.general,fortalezas:obsEdit.fortalezas,mejorar:obsEdit.mejorar}],"estudiante_id,periodo");
+      // per-materia obs
+      const matUpserts = Object.entries(obsEdit.materias)
+        .filter(([,v])=>v!==undefined)
+        .map(([materia_id,texto])=>({estudiante_id:selSt.id,materia_id,periodo:pk,texto}));
+      if(matUpserts.length>0) await UPSERT("observaciones_materia",matUpserts,"estudiante_id,materia_id,periodo");
+      await loadAll();
+      setMObs(false);
+      notify("✅ Observaciones guardadas");
+    } catch(e){ notify("❌ Error: "+e.message,"#dc2626"); }
+    finally{ setSaving(false); }
+  }
+
+  // ── COMUNICACIONES ────────────────────────────────────────
+  async function sendComment() {
+    if(!newCom.texto.trim()){notify("⚠️ Escribe un mensaje","#F59E0B");return;}
+    if(newCom.tipo==="individual"&&!newCom.estudiante_id){notify("⚠️ Selecciona un estudiante","#F59E0B");return;}
+    setSaving(true);
+    try {
+      const st = estudiantes.find(s=>s.id===newCom.estudiante_id);
+      await POST("comunicaciones",{
+        tipo:newCom.tipo,
+        estudiante_id:newCom.tipo==="individual"?newCom.estudiante_id:null,
+        grado:newCom.tipo==="grupal"?newCom.grado:st?.grado,
+        area:newCom.area, texto:newCom.texto, autor:"Directora",
+      });
+      await loadAll();
+      setNewCom({tipo:"individual",area:"General",texto:"",grado:"3A",estudiante_id:""});
+      setMComent(false);
+      notify("✅ Comunicado enviado y guardado");
+    } catch(e){ notify("❌ Error: "+e.message,"#dc2626"); }
+    finally{ setSaving(false); }
+  }
+  async function markRead(id) {
+    try { await PATCH("comunicaciones",`id=eq.${id}`,{leido:true}); await loadAll(); } catch{}
+  }
+  async function markAllRead() {
+    try { await PATCH("comunicaciones","leido=eq.false",{leido:true}); await loadAll(); notify("✅ Todos marcados como leídos"); } catch{}
+  }
+
+  // ── OPEN BOLETIN ──────────────────────────────────────────
+  function openBoletin(student, periodIdx) {
+    const pn    = notasMap[student.id]?.[periodIdx+1]||{};
+    // Build notasMap for this period keyed by materia_id
+    const nMap  = {};
+    actMats.forEach(m=>{ nMap[m.id]=pn[m.id]??null; });
+    const obsD  = obsMap[student.id]?.[periodIdx+1]||{};
+    const matObs= obsMateriaMap[student.id]?.[periodIdx+1]||{};
+    setBoletinV({ student, notasMap:nMap, obsData:{...obsD,materias:matObs}, period:periodIdx });
+    setMBoletin(null);
+  }
+
+  if(portal) {
+    const pNP={};
+    [1,2,3,4].forEach(p=>{ pNP[p]=notasMap[portal.id]?.[p]||{}; });
+    return <ParentPortal student={portal} notasPorPeriodo={pNP} obsTotal={obsMap[portal.id]||{}} materias={materias} comunicaciones={comunicaciones} onBack={()=>setPortal(null)}/>;
+  }
+
+  return (
+    <div style={{fontFamily:"sans-serif",background:"#F4F6F3",minHeight:"100vh",width:"100%",maxWidth:"100vw",overflowX:"hidden"}}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+        html,body{margin:0;padding:0;overflow-x:hidden;background:#F4F6F3}
+        *{box-sizing:border-box}
+        .hov:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,0.12)!important}
+        .hov{transition:transform .18s,box-shadow .18s}
+        .xb:hover{filter:brightness(1.1);transform:translateY(-1px)}
+        .xb{transition:all .15s}
+        @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+        @keyframes slideD{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        input:focus,select:focus,textarea:focus{border-color:#52B788!important;outline:none}
+        ::-webkit-scrollbar{width:5px}
+        ::-webkit-scrollbar-thumb{background:#1B4332;border-radius:3px}
+      `}</style>
+
+      {/* TOAST */}
+      {toast&&<div style={{position:"fixed",top:14,right:14,zIndex:9999,background:toast.color,color:"#fff",padding:"11px 20px",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,.22)",fontFamily:"sans-serif",fontSize:14,fontWeight:600,animation:"slideD .3s ease",maxWidth:340}}>{toast.msg}</div>}
+
+      {/* HEADER */}
+      <header style={{background:"linear-gradient(135deg,#0d3320,#1B4332 55%,#2d6a4f)",color:"#fff",boxShadow:"0 4px 24px rgba(0,0,0,.28)",position:"sticky",top:0,zIndex:100}}>
+        <div style={{maxWidth:1280,margin:"0 auto",padding:"0 20px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:14,padding:"12px 0",flexWrap:"wrap"}}>
+            <div style={{position:"relative",flexShrink:0,cursor:"pointer"}} onClick={()=>logoRef.current.click()} title="Clic para subir escudo">
+              <Shield size={52} url={logoUrl}/>
+              <div style={{position:"absolute",bottom:-1,right:-1,background:"#D4A017",borderRadius:"50%",width:18,height:18,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,border:"2px solid #0d3320"}}>✏️</div>
+            </div>
+            <input ref={logoRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleLogo}/>
+            <div style={{flexShrink:0}}>
+              <div style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:20,fontWeight:700,letterSpacing:.3}}>Mis Pequeños Tesoros</div>
+              <div style={{fontSize:10,opacity:.6,letterSpacing:2,textTransform:"uppercase"}}>Plataforma Académica · Dirección</div>
+            </div>
+
+            {/* DB STATUS */}
+            <div style={{marginLeft:8,display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.1)",borderRadius:20,padding:"4px 12px",fontSize:11,fontFamily:"sans-serif"}}>
+              <div style={{width:7,height:7,borderRadius:"50%",background:dbError?"#EF4444":"#52B788",animation:loading?"pulse 1s infinite":"none"}}/>
+              {loading?"Sincronizando...":dbError?"Sin conexión":"Supabase ✓"}
+            </div>
+
+            <div style={{flex:1}}/>
+            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+              {PERIODOS.map((p,i)=>(
+                <button key={i} onClick={()=>setPeriod(i)} style={{padding:"5px 11px",border:`1px solid ${period===i?"#52B788":"rgba(255,255,255,.2)"}`,borderRadius:20,background:period===i?"rgba(82,183,136,.25)":"transparent",color:period===i?"#52B788":"rgba(255,255,255,.65)",cursor:"pointer",fontSize:11,fontWeight:period===i?700:400}}>{p}</button>
+              ))}
+            </div>
+            <button onClick={()=>setTab("Comunicaciones")} style={{position:"relative",background:"rgba(255,255,255,.1)",border:"1px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px 13px",cursor:"pointer",color:"#fff",fontSize:13,display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
+              🔔{unread>0&&<span style={{background:"#DC2626",color:"#fff",borderRadius:"50%",width:17,height:17,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:"bold",animation:"pulse 1.5s infinite"}}>{unread}</span>}
+            </button>
+            <button onClick={onLogout} title="Cerrar sesión"
+              style={{background:"rgba(255,255,255,.1)",border:"1px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px 13px",cursor:"pointer",color:"#fff",fontSize:13,flexShrink:0}}>
+              🚪
+            </button>
+          </div>
+          <nav style={{display:"flex",gap:0,overflowX:"auto"}}>
+            {TABS.map(([t,ic])=>(
+              <button key={t} onClick={()=>setTab(t)} style={{padding:"9px 14px",border:"none",cursor:"pointer",fontSize:12,fontWeight:tab===t?700:400,whiteSpace:"nowrap",background:tab===t?"rgba(82,183,136,.2)":"transparent",color:tab===t?"#52B788":"rgba(255,255,255,.68)",borderBottom:tab===t?"3px solid #52B788":"3px solid transparent",display:"flex",alignItems:"center",gap:5}}>{ic} {t}</button>
+            ))}
+          </nav>
+        </div>
+      </header>
+
+      <main style={{maxWidth:1280,margin:"0 auto",padding:"24px 20px"}}>
+        {loading && <Spinner/>}
+        {dbError && !loading && (
+          <div style={{background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:12,padding:"20px 24px",marginBottom:20}}>
+            <div style={{fontWeight:700,color:"#991B1B",marginBottom:8}}>❌ Error conectando con Supabase</div>
+            <div style={{fontSize:13,color:"#7f1d1d",marginBottom:12,fontFamily:"monospace"}}>{dbError}</div>
+            <div style={{fontSize:13,color:"#991B1B",marginBottom:12}}>Asegúrate de haber ejecutado el SQL del schema en tu proyecto Supabase.</div>
+            <button onClick={loadAll} style={{background:"#DC2626",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",cursor:"pointer",fontWeight:700}}>🔄 Reintentar conexión</button>
+          </div>
+        )}
+
+        {!loading && !dbError && (
+          <>
+          {/* ═══════ DASHBOARD ═══════ */}
+          {tab==="Dashboard"&&(
+            <div style={{animation:"fadeIn .35s"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22,flexWrap:"wrap",gap:10}}>
+                <div>
+                  <h2 style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#1B4332",margin:0}}>Resumen General</h2>
+                  <p style={{fontSize:13,color:"#6b7280",marginTop:4}}>{PERIODOS[period]} · {new Date().toLocaleDateString("es-CO",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</p>
+                </div>
+                <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+                  <button onClick={()=>setMStudent(true)} className="xb" style={{background:"#1B4332",color:"#fff",border:"none",borderRadius:10,padding:"9px 16px",fontSize:13,fontWeight:600,cursor:"pointer"}}>+ Estudiante</button>
+                  <button onClick={()=>setMComent(true)} className="xb" style={{background:"#52B788",color:"#fff",border:"none",borderRadius:10,padding:"9px 16px",fontSize:13,fontWeight:600,cursor:"pointer"}}>💬 Comunicado</button>
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:13,marginBottom:22}}>
+                {[
+                  {label:"Estudiantes",  v:estudiantes.length,     icon:"👨‍🎓",color:"#1B4332",sub:"en base de datos"},
+                  {label:"Materias Act.",v:actMats.length,          icon:"🗂️", color:"#7C3AED",sub:`de ${materias.length} total`},
+                  {label:"Promedio",     v:fmt(overallAvg()),       icon:"📈",color:"#0d6efd",sub:lbl(overallAvg())},
+                  {label:"Mensajes",     v:unread,                  icon:"📩",color:"#D97706",sub:"sin leer"},
+                  {label:"En Riesgo",    v:atRisk.length,           icon:"⚠️",color:"#DC2626",sub:"promedio < 7.0"},
+                ].map(c=>(
+                  <div key={c.label} className="hov" style={{background:"#fff",borderRadius:13,padding:"18px 16px",boxShadow:"0 2px 12px rgba(0,0,0,.06)",borderTop:"4px solid "+c.color}}>
+                    <div style={{fontSize:24,marginBottom:5}}>{c.icon}</div>
+                    <div style={{fontFamily:"'Playfair Display',serif",fontSize:28,fontWeight:700,color:c.color}}>{c.v}</div>
+                    <div style={{fontSize:12,fontWeight:600,color:"#374151",marginTop:2}}>{c.label}</div>
+                    <div style={{fontSize:11,color:"#9ca3af"}}>{c.sub}</div>
+                  </div>
+                ))}
+              </div>
+
+              {atRisk.length>0&&(
+                <div style={{background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:13,padding:"15px 18px",marginBottom:20}}>
+                  <div style={{fontWeight:700,color:"#991B1B",marginBottom:10,fontSize:14}}>⚠️ Estudiantes que requieren atención — {PERIODOS[period]}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:9}}>
+                    {atRisk.map(s=>{
+                      const a=getAvg(s.id,pk);
+                      return (
+                        <div key={s.id} style={{background:"#fff",borderRadius:9,padding:"10px 14px",display:"flex",alignItems:"center",gap:9}}>
+                          <div style={{width:32,height:32,borderRadius:"50%",background:"#DC2626",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold",fontSize:11,flexShrink:0}}>{s.avatar||mkAv(s.nombre)}</div>
+                          <div style={{flex:1}}>
+                            <div style={{fontWeight:600,fontSize:13}}>{s.nombre}</div>
+                            <div style={{fontSize:11,color:"#6b7280"}}>Grado {s.grado} · Prom: <strong style={{color:"#DC2626"}}>{fmt(a)}</strong></div>
+                          </div>
+                          <button className="xb" onClick={()=>{setNewCom(c=>({...c,tipo:"individual",estudiante_id:s.id}));setMComent(true);}} style={{background:"#DC2626",color:"#fff",border:"none",borderRadius:7,padding:"5px 9px",cursor:"pointer",fontSize:11,fontWeight:600}}>Contactar</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <h3 style={{fontFamily:"'Playfair Display',serif",fontSize:17,color:"#1B4332",marginBottom:11}}>Últimas Comunicaciones</h3>
+              {comunicaciones.slice(0,5).map(c=>(
+                <div key={c.id} style={{background:"#fff",borderRadius:11,padding:"12px 16px",marginBottom:9,boxShadow:"0 1px 8px rgba(0,0,0,.05)",borderLeft:"4px solid "+(c.tipo==="grupal"?"#52B788":"#D4A017"),display:"flex",gap:11,alignItems:"flex-start"}}>
+                  <span style={{fontSize:19,flexShrink:0}}>{c.tipo==="grupal"?"👥":"👤"}</span>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginBottom:3}}>
+                      <span style={{fontWeight:700,fontSize:13}}>{c.tipo==="grupal"?`Grado ${c.grado} – ${c.area}`:estudiantes.find(s=>s.id===c.estudiante_id)?.nombre||"—"}</span>
+                      {!c.leido&&<span style={{background:"#DC2626",color:"#fff",fontSize:9,padding:"2px 6px",borderRadius:9,fontWeight:700}}>NUEVO</span>}
+                    </div>
+                    <div style={{fontSize:12,color:"#4b5563",lineHeight:1.4}}>{c.texto}</div>
+                    <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>📅 {c.created_at?.slice(0,10)} · ✍️ {c.autor}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ═══════ ESTUDIANTES ═══════ */}
+          {tab==="Estudiantes"&&(
+            <div style={{animation:"fadeIn .35s"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
+                <h2 style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#1B4332",margin:0}}>Estudiantes</h2>
+                <div style={{display:"flex",gap:9,alignItems:"center"}}>
+                  <select value={gradeF} onChange={e=>setGradeF(e.target.value)} style={{padding:"8px 12px",borderRadius:10,border:"1px solid #d1fae5",color:"#1B4332",background:"#fff",fontSize:13,cursor:"pointer"}}>
+                    <option value="Todos">Todos los grados</option>
+                    {GRADES.map(g=><option key={g}>{g}</option>)}
+                  </select>
+                  <button onClick={()=>setMStudent(true)} className="xb" style={{background:"#1B4332",color:"#fff",border:"none",borderRadius:10,padding:"9px 16px",fontSize:13,fontWeight:600,cursor:"pointer"}}>+ Agregar</button>
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))",gap:14}}>
+                {filtSts.map(s=>{
+                  const a  = getAvg(s.id,pk);
+                  const nc = comunicaciones.filter(c=>c.estudiante_id===s.id).length;
+                  return (
+                    <div key={s.id} className="hov" style={{background:"#fff",borderRadius:15,padding:"18px",boxShadow:"0 2px 12px rgba(0,0,0,.07)"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:13}}>
+                        <div style={{width:46,height:46,borderRadius:"50%",flexShrink:0,background:"linear-gradient(135deg,#1B4332,#52B788)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold",fontSize:14}}>{s.avatar||mkAv(s.nombre)}</div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontWeight:700,fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.nombre}</div>
+                          <div style={{fontSize:12,color:"#6b7280"}}>Grado {s.grado}</div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:nClr(a)}}>{fmt(a)}</div>
+                          <div style={{fontSize:9,color:"#9ca3af"}}>Promedio</div>
+                        </div>
+                      </div>
+                      <div style={{background:"#f9fbf9",borderRadius:8,padding:"8px 11px",marginBottom:12,fontSize:12,color:"#6b7280"}}>
+                        <div>👨‍👩‍👦 {s.parent_nombre||"Sin registrar"}</div>
+                        {s.parent_telefono&&<div style={{marginTop:2}}>📱 {s.parent_telefono}</div>}
+                        {nc>0&&<div style={{marginTop:2,color:"#52B788",fontWeight:600}}>💬 {nc} comunicado(s)</div>}
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                        <button className="xb" onClick={()=>{setSelSt(s);setNoteEd({...getNotasPeriodo(s.id,pk)});setMNota(true);}} style={{background:"#1B4332",color:"#fff",border:"none",borderRadius:8,padding:"8px 0",fontSize:12,fontWeight:600,cursor:"pointer"}}>✏️ Notas</button>
+                        <button className="xb" onClick={()=>{setNewCom(c=>({...c,tipo:"individual",estudiante_id:s.id}));setMComent(true);}} style={{background:"#52B788",color:"#fff",border:"none",borderRadius:8,padding:"8px 0",fontSize:12,fontWeight:600,cursor:"pointer"}}>💬 Comentar</button>
+                        <button className="xb" onClick={()=>setMBoletin(s)} style={{background:"#D4A017",color:"#fff",border:"none",borderRadius:8,padding:"8px 0",fontSize:12,fontWeight:600,cursor:"pointer"}}>📄 Boletín</button>
+                        <button className="xb" onClick={()=>setMLink(s)} style={{background:"#7C3AED",color:"#fff",border:"none",borderRadius:8,padding:"8px 0",fontSize:12,fontWeight:600,cursor:"pointer"}}>🔗 Portal</button>
+                        <button className="xb" onClick={()=>openObs(s)} style={{background:"#0369a1",color:"#fff",border:"none",borderRadius:8,padding:"8px 0",fontSize:12,fontWeight:600,cursor:"pointer",gridColumn:"1/-1"}}>📝 Observaciones del período</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ═══════ ACTIVIDADES ═══════ */}
+          {tab==="Actividades"&&(
+            <div style={{animation:"fadeIn .35s"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:10}}>
+                <div>
+                  <h2 style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#1B4332",margin:0}}>Actividades Semanales</h2>
+                  <p style={{fontSize:13,color:"#6b7280",marginTop:4}}>{PERIODOS[period]} · Registro de tareas, evaluaciones y trabajos</p>
+                </div>
+                <button onClick={()=>{setNewAct(a=>({...a,periodo:period+1,fecha:tod()}));setMAct(true);}} className="xb"
+                  style={{background:"#1B4332",color:"#fff",border:"none",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                  + Nueva Actividad
+                </button>
+              </div>
+
+              {/* PESOS INFO */}
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:20}}>
+                {Object.entries(ACT_TIPOS).map(([tipo,{peso,color,bg,icon}])=>(
+                  <div key={tipo} style={{background:bg,border:`1px solid ${color}44`,borderRadius:20,padding:"5px 12px",fontSize:11,color,fontWeight:600,display:"flex",alignItems:"center",gap:5}}>
+                    {icon} {tipo} <span style={{opacity:.7}}>({Math.round(peso*100)}%)</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* FILTROS */}
+              <div style={{display:"flex",gap:10,marginBottom:18,flexWrap:"wrap"}}>
+                <select value={gradeF} onChange={e=>setGradeF(e.target.value)}
+                  style={{padding:"8px 12px",borderRadius:10,border:"1px solid #d1fae5",fontSize:13,background:"#fff",cursor:"pointer"}}>
+                  <option value="Todos">Todos los grados</option>
+                  {GRADES.map(g=><option key={g}>{g}</option>)}
+                </select>
+              </div>
+
+              {/* TARJETAS POR ESTUDIANTE */}
+              {filtSts.map(s=>{
+                const acts = actividades.filter(a=>a.estudiante_id===s.id&&a.periodo===pk);
+                const prom = avgPonderado(acts);
+
+                // agrupar por semana
+                const porSemana = {};
+                acts.forEach(a=>{
+                  const sem = semanaLabel(a.fecha);
+                  if(!porSemana[sem]) porSemana[sem]=[];
+                  porSemana[sem].push(a);
+                });
+
+                return (
+                  <div key={s.id} style={{background:"#fff",borderRadius:14,marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.07)",overflow:"hidden"}}>
+                    {/* header estudiante */}
+                    <div style={{padding:"14px 18px",background:"linear-gradient(90deg,#0d3320,#1B4332)",display:"flex",alignItems:"center",gap:12}}>
+                      <div style={{width:38,height:38,borderRadius:"50%",background:"rgba(255,255,255,0.15)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold",fontSize:13,flexShrink:0}}>{s.avatar||mkAv(s.nombre)}</div>
+                      <div style={{flex:1}}>
+                        <div style={{color:"#fff",fontWeight:700,fontSize:14}}>{s.nombre}</div>
+                        <div style={{color:"rgba(255,255,255,0.55)",fontSize:11}}>Grado {s.grado} · {acts.length} actividades · {PERIODOS[period]}</div>
+                      </div>
+                      <div style={{textAlign:"center",flexShrink:0}}>
+                        <div style={{fontFamily:"Georgia,serif",fontSize:24,fontWeight:700,color:prom!=null?nClr(prom):"rgba(255,255,255,0.4)"}}>{fmt(prom)}</div>
+                        <div style={{fontSize:9,color:"rgba(255,255,255,0.45)"}}>Prom. ponderado</div>
+                      </div>
+                      <button onClick={()=>{setNewAct(a=>({...a,estudiante_id:s.id,periodo:period+1,fecha:tod()}));setMAct(true);}} className="xb"
+                        style={{background:"#52B788",color:"#fff",border:"none",borderRadius:8,padding:"7px 12px",fontSize:11,fontWeight:600,cursor:"pointer",flexShrink:0}}>
+                        + Actividad
+                      </button>
+                    </div>
+
+                    {acts.length===0?(
+                      <div style={{padding:"20px 18px",fontSize:13,color:"#9ca3af",textAlign:"center"}}>Sin actividades registradas en {PERIODOS[period]}</div>
+                    ):(
+                      <div style={{padding:"14px 18px"}}>
+                        {/* resumen por tipo */}
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+                          {Object.entries(ACT_TIPOS).map(([tipo,{color,bg,icon}])=>{
+                            const tipoActs=acts.filter(a=>a.tipo===tipo);
+                            if(tipoActs.length===0) return null;
+                            const tipoAvg=avg(tipoActs.map(a=>parseFloat(a.nota)));
+                            return(
+                              <div key={tipo} style={{background:bg,borderRadius:9,padding:"7px 11px",fontSize:11,display:"flex",alignItems:"center",gap:6,border:`1px solid ${color}33`}}>
+                                <span>{icon}</span>
+                                <span style={{color,fontWeight:600}}>{tipo}</span>
+                                <span style={{color,fontWeight:700,fontSize:13}}>{fmt(tipoAvg)}</span>
+                                <span style={{color:"#9ca3af"}}>({tipoActs.length})</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* actividades por semana */}
+                        {Object.entries(porSemana).map(([semana,semActs])=>{
+                          const semAvg=avg(semActs.map(a=>parseFloat(a.nota)));
+                          return(
+                            <div key={semana} style={{marginBottom:12}}>
+                              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                                <div style={{fontSize:11,fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:1}}>📅 Semana {semana}</div>
+                                <div style={{height:1,flex:1,background:"#f3f4f6"}}/>
+                                <div style={{fontFamily:"Georgia,serif",fontSize:14,fontWeight:700,color:nClr(semAvg)}}>{fmt(semAvg)}</div>
+                              </div>
+                              <div style={{display:"grid",gap:6}}>
+                                {semActs.map(a=>{
+                                  const {color,bg,icon}=ACT_TIPOS[a.tipo]||{color:"#6b7280",bg:"#f3f4f6",icon:"📌"};
+                                  return(
+                                    <div key={a.id} style={{display:"flex",alignItems:"center",gap:10,background:"#f9fbf9",borderRadius:9,padding:"9px 12px",border:`1px solid ${color}22`}}>
+                                      <span style={{fontSize:16,flexShrink:0}}>{icon}</span>
+                                      <div style={{flex:1,minWidth:0}}>
+                                        <div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.titulo}</div>
+                                        <div style={{fontSize:11,color:"#9ca3af",marginTop:1}}>
+                                          <span style={{background:bg,color,borderRadius:9,padding:"1px 7px",fontWeight:600,marginRight:6}}>{a.tipo}</span>
+                                          {actMats.find(m=>m.id===a.materia_id)?.icono} {actMats.find(m=>m.id===a.materia_id)?.nombre||"—"}
+                                          {a.observacion&&<span style={{marginLeft:6,fontStyle:"italic"}}>· {a.observacion}</span>}
+                                        </div>
+                                      </div>
+                                      <span style={{background:nBg(parseFloat(a.nota)),color:nClr(parseFloat(a.nota)),borderRadius:8,padding:"3px 10px",fontWeight:700,fontSize:15,flexShrink:0}}>{fmt(parseFloat(a.nota))}</span>
+                                      <button onClick={()=>setMDelAct(a)} style={{background:"none",border:"none",cursor:"pointer",fontSize:14,color:"#9ca3af",flexShrink:0,padding:"2px 4px"}}>🗑️</button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ═══════ NOTAS ═══════ */}
+          {tab==="Notas"&&(
+            <div style={{animation:"fadeIn .35s"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
+                <div>
+                  <h2 style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#1B4332",margin:0}}>Registro de Notas</h2>
+                  <p style={{fontSize:13,color:"#6b7280",marginTop:4}}>{PERIODOS[period]} · {actMats.length} materias activas</p>
+                </div>
+                <select value={gradeF} onChange={e=>setGradeF(e.target.value)} style={{padding:"8px 12px",borderRadius:10,border:"1px solid #d1fae5",color:"#1B4332",background:"#fff",fontSize:13,cursor:"pointer"}}>
+                  <option value="Todos">Todos</option>
+                  {GRADES.map(g=><option key={g}>{g}</option>)}
+                </select>
+              </div>
+              {actMats.length===0?(
+                <div style={{background:"#fef3c7",border:"1px solid #f59e0b",borderRadius:12,padding:"18px 22px",fontSize:13,color:"#92400e"}}>⚠️ No hay materias activas. Ve a <strong>Materias</strong> para activarlas.</div>
+              ):(
+                <div style={{background:"#fff",borderRadius:14,overflow:"hidden",boxShadow:"0 2px 16px rgba(0,0,0,.07)"}}>
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:560}}>
+                      <thead>
+                        <tr style={{background:"linear-gradient(90deg,#0d3320,#1B4332)",color:"#fff"}}>
+                          <th style={{padding:"11px 14px",textAlign:"left",fontWeight:600}}>Estudiante</th>
+                          {actMats.map(m=>(
+                            <th key={m.id} style={{padding:"11px 7px",textAlign:"center",fontWeight:600,whiteSpace:"nowrap"}}>{m.icono}<br/><span style={{fontSize:10}}>{m.nombre}</span></th>
+                          ))}
+                          <th style={{padding:"11px 7px",textAlign:"center",fontWeight:600}}>Prom.</th>
+                          <th style={{padding:"11px 7px",textAlign:"center",fontWeight:600}}>Estado</th>
+                          <th style={{padding:"11px 7px"}}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtSts.map((s,i)=>{
+                          const sn = getNotasPeriodo(s.id,pk);
+                          const a  = avg(actMats.map(m=>sn[m.id]));
+                          return (
+                            <tr key={s.id} style={{background:i%2===0?"#fff":"#f9fbf9",borderBottom:"1px solid #f3f4f6"}}>
+                              <td style={{padding:"10px 14px"}}>
+                                <div style={{display:"flex",alignItems:"center",gap:7}}>
+                                  <div style={{width:28,height:28,borderRadius:"50%",flexShrink:0,background:"linear-gradient(135deg,#1B4332,#52B788)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold",fontSize:10}}>{s.avatar||mkAv(s.nombre)}</div>
+                                  <div><div style={{fontWeight:600,fontSize:12}}>{s.nombre}</div><div style={{fontSize:10,color:"#9ca3af"}}>Grado {s.grado}</div></div>
+                                </div>
+                              </td>
+                              {actMats.map(m=>{
+                                const n=sn[m.id];
+                                return <td key={m.id} style={{padding:"8px 5px",textAlign:"center"}}><span style={{background:nBg(n),color:nClr(n),borderRadius:7,padding:"2px 7px",fontWeight:700,fontSize:12}}>{fmt(n)}</span></td>;
+                              })}
+                              <td style={{padding:"8px",textAlign:"center"}}><span style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:nClr(a)}}>{fmt(a)}</span></td>
+                              <td style={{padding:"8px",textAlign:"center"}}><span style={{background:nBg(a),color:nClr(a),borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:600}}>{lbl(a)}</span></td>
+                              <td style={{padding:"8px",textAlign:"center"}}><button className="xb" onClick={()=>{setSelSt(s);setNoteEd({...sn});setMNota(true);}} style={{background:"#1B4332",color:"#fff",border:"none",borderRadius:7,padding:"5px 9px",cursor:"pointer",fontSize:11,fontWeight:600}}>✏️</button></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ═══════ MATERIAS ═══════ */}
+          {tab==="Materias"&&(
+            <div style={{animation:"fadeIn .35s"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:10}}>
+                <div>
+                  <h2 style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#1B4332",margin:0}}>Gestión de Materias</h2>
+                  <p style={{fontSize:13,color:"#6b7280",marginTop:4}}>{actMats.length} activas · {materias.filter(m=>!m.activa).length} inactivas · {materias.length} total</p>
+                </div>
+                <button onClick={()=>{setFMat({nombre:"",icono:"📚",docente:"",color:"#3B82F6",activa:true});setMMateria("new");}} className="xb" style={{background:"#1B4332",color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Nueva Materia</button>
+              </div>
+              <div style={{background:"#ede9fe",border:"1px solid #c4b5fd",borderRadius:11,padding:"13px 17px",marginBottom:20,fontSize:13,color:"#5b21b6"}}>
+                💡 Los cambios se guardan directamente en Supabase y se sincronizan en todos los dispositivos.
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:13}}>
+                {materias.map(m=>(
+                  <div key={m.id} className="hov" style={{background:"#fff",borderRadius:14,padding:"18px 20px",boxShadow:"0 2px 12px rgba(0,0,0,.07)",opacity:m.activa?1:0.6,border:"2px solid "+(m.activa?"transparent":"#e5e7eb")}}>
+                    <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
+                      <div style={{width:50,height:50,borderRadius:13,flexShrink:0,background:m.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26}}>{m.icono}</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                          <span style={{fontWeight:700,fontSize:15}}>{m.nombre}</span>
+                          <span style={{background:m.activa?"#d1fae5":"#f3f4f6",color:m.activa?"#065f46":"#6b7280",fontSize:10,padding:"2px 8px",borderRadius:10,fontWeight:700}}>{m.activa?"ACTIVA":"INACTIVA"}</span>
+                        </div>
+                        {m.docente&&<div style={{fontSize:12,color:"#6b7280",marginTop:3}}>👩‍🏫 {m.docente}</div>}
+                      </div>
+                      <div style={{width:11,height:11,borderRadius:"50%",background:m.color,flexShrink:0}}/>
+                    </div>
+                    <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                      <button className="xb" onClick={()=>{setFMat({...m});setMMateria(m);}} style={{flex:"1 1 auto",background:"#1B4332",color:"#fff",border:"none",borderRadius:8,padding:"9px 0",fontSize:12,fontWeight:600,cursor:"pointer"}}>✏️ Editar</button>
+                      <button className="xb" onClick={()=>toggleMat(m)} style={{flex:"1 1 auto",background:m.activa?"#F59E0B":"#52B788",color:"#fff",border:"none",borderRadius:8,padding:"9px 0",fontSize:12,fontWeight:600,cursor:"pointer"}}>{m.activa?"⏸ Desactivar":"▶ Activar"}</button>
+                      <button className="xb" onClick={()=>setMDelMat(m)} style={{flex:"0 0 auto",background:"#fee2e2",color:"#dc2626",border:"none",borderRadius:8,padding:"9px 14px",fontSize:13,fontWeight:600,cursor:"pointer"}}>🗑️</button>
+                    </div>
+                  </div>
+                ))}
+                <div onClick={()=>{setFMat({nombre:"",icono:"📚",docente:"",color:"#3B82F6",activa:true});setMMateria("new");}} className="hov" style={{background:"transparent",borderRadius:14,padding:"20px",border:"2px dashed #a7f3d0",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:9,minHeight:130,cursor:"pointer"}}>
+                  <div style={{width:50,height:50,borderRadius:"50%",background:"#d1fae5",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,color:"#1B4332"}}>+</div>
+                  <div style={{fontSize:13,color:"#6b7280",fontWeight:600}}>Nueva Materia</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ═══════ COMUNICACIONES ═══════ */}
+          {tab==="Comunicaciones"&&(
+            <div style={{animation:"fadeIn .35s"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
+                <h2 style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#1B4332",margin:0}}>Comunicaciones con Padres</h2>
+                <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+                  {unread>0&&<button className="xb" onClick={markAllRead} style={{background:"transparent",color:"#6b7280",border:"1px solid #d1d5db",borderRadius:10,padding:"8px 13px",fontSize:12,cursor:"pointer"}}>✓ Marcar leídos</button>}
+                  <button className="xb" onClick={()=>{setNewCom(c=>({...c,tipo:"grupal"}));setMComent(true);}} style={{background:"#1B4332",color:"#fff",border:"none",borderRadius:10,padding:"9px 15px",fontSize:13,fontWeight:600,cursor:"pointer"}}>👥 Grupal</button>
+                  <button className="xb" onClick={()=>{setNewCom(c=>({...c,tipo:"individual"}));setMComent(true);}} style={{background:"#52B788",color:"#fff",border:"none",borderRadius:10,padding:"9px 15px",fontSize:13,fontWeight:600,cursor:"pointer"}}>👤 Individual</button>
+                </div>
+              </div>
+              {comunicaciones.length===0&&<div style={{textAlign:"center",padding:60,color:"#9ca3af"}}>No hay comunicaciones aún.</div>}
+              {comunicaciones.map(c=>(
+                <div key={c.id} onClick={()=>markRead(c.id)} style={{background:c.leido?"#fff":"#f0fff4",borderRadius:13,padding:"14px 18px",marginBottom:10,boxShadow:"0 1px 10px rgba(0,0,0,.05)",borderLeft:"5px solid "+(c.tipo==="grupal"?"#52B788":"#D4A017"),cursor:"pointer"}}>
+                  <div style={{display:"flex",gap:11,alignItems:"flex-start"}}>
+                    <div style={{width:38,height:38,borderRadius:9,flexShrink:0,background:c.tipo==="grupal"?"#d1fae5":"#fef3c7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>{c.tipo==="grupal"?"👥":"👤"}</div>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginBottom:4}}>
+                        <span style={{fontWeight:700,fontSize:13}}>{c.tipo==="grupal"?`Grado ${c.grado} – ${c.area}`:estudiantes.find(s=>s.id===c.estudiante_id)?.nombre||"—"}</span>
+                        <span style={{background:c.tipo==="grupal"?"#d1fae5":"#fef3c7",color:c.tipo==="grupal"?"#065f46":"#92400e",fontSize:10,padding:"2px 7px",borderRadius:9,fontWeight:700}}>{c.tipo==="grupal"?"GRUPAL":"INDIVIDUAL"}</span>
+                        <span style={{background:"#ede9fe",color:"#5b21b6",fontSize:10,padding:"2px 7px",borderRadius:9,fontWeight:600}}>{c.area}</span>
+                        {!c.leido&&<span style={{background:"#DC2626",color:"#fff",fontSize:9,padding:"2px 6px",borderRadius:9,fontWeight:700}}>NUEVO</span>}
+                      </div>
+                      <div style={{fontSize:13,color:"#374151",lineHeight:1.5}}>{c.texto}</div>
+                      <div style={{fontSize:11,color:"#9ca3af",marginTop:5}}>📅 {c.created_at?.slice(0,10)} · ✍️ {c.autor}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ═══════ REPORTES ═══════ */}
+          {tab==="Reportes"&&(
+            <div style={{animation:"fadeIn .35s"}}>
+              <div style={{marginBottom:22}}>
+                <h2 style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#1B4332",margin:0}}>Reportes Académicos</h2>
+                <p style={{fontSize:13,color:"#6b7280",marginTop:4}}>Genera, visualiza e imprime reportes completos del colegio.</p>
+              </div>
+
+              {/* TIPO DE REPORTE */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:13,marginBottom:28}}>
+                {[
+                  {id:"seguimiento",icon:"🧒",title:"Seguimiento Individual",desc:"Evolución completa del estudiante, logros y recomendaciones. Ideal para reuniones con padres y terapeutas.",color:"#7C3AED"},
+                  {id:"grado",      icon:"👥",title:"Reporte por Grado",    desc:"Tabla comparativa de todos los estudiantes del grado con semáforo de desempeño.",color:"#0369a1"},
+                  {id:"materia",    icon:"📚",title:"Reporte por Materia",  desc:"Cómo le fue a todo el colegio en cada área académica.",color:"#D4A017"},
+                  {id:"general",    icon:"🏫",title:"Reporte General",      desc:"Resumen ejecutivo institucional: promedios, distribución y estudiantes en riesgo.",color:"#1B4332"},
+                ].map(r=>(
+                  <div key={r.id} className="hov" onClick={()=>setReporteActivo(r.id)}
+                    style={{background:reporteActivo===r.id?"#f0fff4":"#fff",borderRadius:14,padding:"20px",
+                            boxShadow:"0 2px 12px rgba(0,0,0,.07)",cursor:"pointer",
+                            border:"2px solid "+(reporteActivo===r.id?r.color:"transparent")}}>
+                    <div style={{fontSize:32,marginBottom:10}}>{r.icon}</div>
+                    <div style={{fontWeight:700,fontSize:14,color:r.color,marginBottom:6}}>{r.title}</div>
+                    <div style={{fontSize:12,color:"#6b7280",lineHeight:1.5}}>{r.desc}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* ── REPORTE SEGUIMIENTO INDIVIDUAL ── */}
+              {reporteActivo==="seguimiento"&&(
+                <div>
+                  <div style={{display:"flex",gap:10,marginBottom:18,flexWrap:"wrap",alignItems:"center"}}>
+                    <select value={reporteEstudiante} onChange={e=>setReporteEstudiante(e.target.value)}
+                      style={{padding:"9px 14px",borderRadius:10,border:"1px solid #d1fae5",fontSize:13,background:"#fff",flex:1,minWidth:200}}>
+                      <option value="">Seleccionar estudiante...</option>
+                      {estudiantes.map(s=><option key={s.id} value={s.id}>{s.nombre} · Grado {s.grado}</option>)}
+                    </select>
+                    {reporteEstudiante!=""&&<button onClick={()=>printReporte()} className="xb"
+                      style={{background:"#7C3AED",color:"#fff",border:"none",borderRadius:10,padding:"9px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                      🖨️ Imprimir
+                    </button>}
+                  </div>
+                  {reporteEstudiante!=""&&(()=>{
+                    const st = estudiantes.find(s=>String(s.id)===String(reporteEstudiante));
+                    if(!st) return null;
+                    return (
+                      <div id="reporte-print" style={{background:"#fff",borderRadius:14,padding:"28px",boxShadow:"0 2px 16px rgba(0,0,0,.07)"}}>
+                        {/* encabezado institución */}
+                        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,paddingBottom:12,borderBottom:"2px solid #ede9fe"}}>
+                          {logoUrl?<img src={logoUrl} alt="Escudo" style={{width:44,height:44,borderRadius:"50%",objectFit:"cover",flexShrink:0}}/>:<div style={{width:44,height:44,borderRadius:"50%",background:"linear-gradient(135deg,#0d3320,#1B4332)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>🏫</div>}
+                          <div>
+                            <div style={{fontFamily:"Georgia,serif",fontSize:16,fontWeight:700,color:"#1B4332"}}>Mis Pequeños Tesoros</div>
+                            <div style={{fontSize:10,color:"#9ca3af"}}>Reporte de Seguimiento Individual</div>
+                          </div>
+                        </div>
+                        {/* header estudiante */}
+                        <div style={{borderBottom:"3px solid #7C3AED",paddingBottom:14,marginBottom:20,display:"flex",alignItems:"center",gap:14}}>
+                          <div style={{width:52,height:52,borderRadius:"50%",background:"linear-gradient(135deg,#5b21b6,#7C3AED)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold",fontSize:16,flexShrink:0}}>{st.avatar||mkAv(st.nombre)}</div>
+                          <div style={{flex:1}}>
+                            <div style={{fontFamily:"Georgia,serif",fontSize:20,fontWeight:700,color:"#5b21b6"}}>{st.nombre}</div>
+                            <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>Grado {st.grado} · Acudiente: {st.parent_nombre||"—"} · {st.parent_telefono||""}</div>
+                          </div>
+                          <div style={{textAlign:"right",fontSize:11,color:"#9ca3af"}}>Fecha: {tod()}</div>
+                        </div>
+
+                        {/* evolución por período */}
+                        <h3 style={{fontFamily:"Georgia,serif",fontSize:16,color:"#5b21b6",marginBottom:14}}>📈 Evolución Académica por Período</h3>
+                        <div style={{overflowX:"auto",marginBottom:22}}>
+                          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:400}}>
+                            <thead>
+                              <tr style={{background:"#7C3AED",color:"#fff"}}>
+                                <th style={{padding:"9px 12px",textAlign:"left"}}>Materia</th>
+                                {PERIODOS.map(p=><th key={p} style={{padding:"9px 8px",textAlign:"center"}}>{p}</th>)}
+                                <th style={{padding:"9px 8px",textAlign:"center"}}>Tendencia</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {actMats.map((m,i)=>{
+                                const notas4 = [1,2,3,4].map(p=>getNotasPeriodo(st.id,p)[m.id]??null);
+                                const validas = notas4.filter(n=>n!==null);
+                                const tendencia = validas.length>=2 ? (validas[validas.length-1]-validas[0]>=0?"📈":"📉") : "—";
+                                return (
+                                  <tr key={m.id} style={{background:i%2===0?"#fff":"#f9f5ff",borderBottom:"1px solid #e5e7eb"}}>
+                                    <td style={{padding:"9px 12px",fontWeight:600}}>{m.icono} {m.nombre}</td>
+                                    {notas4.map((n,pi)=>(
+                                      <td key={pi} style={{padding:"9px 8px",textAlign:"center"}}>
+                                        <span style={{background:nBg(n),color:nClr(n),borderRadius:6,padding:"2px 10px",fontWeight:700,fontSize:13}}>{fmt(n)}</span>
+                                      </td>
+                                    ))}
+                                    <td style={{padding:"9px 8px",textAlign:"center",fontSize:16}}>{tendencia}</td>
+                                  </tr>
+                                );
+                              })}
+                              {/* promedio row */}
+                              <tr style={{background:"#f3e8ff",fontWeight:700,borderTop:"2px solid #7C3AED"}}>
+                                <td style={{padding:"9px 12px",color:"#5b21b6"}}>Promedio General</td>
+                                {[1,2,3,4].map(p=>{
+                                  const a=getAvg(st.id,p);
+                                  return <td key={p} style={{padding:"9px 8px",textAlign:"center"}}>
+                                    <span style={{fontFamily:"Georgia,serif",fontSize:15,color:nClr(a),fontWeight:700}}>{fmt(a)}</span>
+                                  </td>;
+                                })}
+                                <td/>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* observaciones acumuladas */}
+                        <h3 style={{fontFamily:"Georgia,serif",fontSize:16,color:"#5b21b6",marginBottom:14}}>📝 Observaciones por Período</h3>
+                        {[0,1,2,3].map(pi=>{
+                          const od = obsMap[st.id]?.[pi+1];
+                          if(!od?.general&&!od?.fortalezas&&!od?.mejorar) return null;
+                          return (
+                            <div key={pi} style={{background:"#f9f5ff",borderRadius:10,padding:"14px 18px",marginBottom:12,border:"1px solid #ddd6fe"}}>
+                              <div style={{fontWeight:700,color:"#5b21b6",fontSize:13,marginBottom:10}}>{PERIODOS[pi]}</div>
+                              {od.general&&<div style={{marginBottom:8}}><span style={{fontSize:10,fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:1}}>Observación general</span><p style={{fontSize:12,color:"#374151",marginTop:3,fontStyle:"italic"}}>"{od.general}"</p></div>}
+                              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                                {od.fortalezas&&<div style={{background:"#f0fdf4",borderRadius:8,padding:"10px 12px"}}><div style={{fontSize:10,fontWeight:700,color:"#065f46",textTransform:"uppercase",letterSpacing:1,marginBottom:4}}>⭐ Fortalezas</div><p style={{fontSize:12,color:"#065f46",margin:0}}>{od.fortalezas}</p></div>}
+                                {od.mejorar&&<div style={{background:"#fff7ed",borderRadius:8,padding:"10px 12px"}}><div style={{fontSize:10,fontWeight:700,color:"#9a3412",textTransform:"uppercase",letterSpacing:1,marginBottom:4}}>📈 A mejorar</div><p style={{fontSize:12,color:"#9a3412",margin:0}}>{od.mejorar}</p></div>}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        {/* firma */}
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:40,paddingTop:20,marginTop:16,borderTop:"1px solid #e5e7eb"}}>
+                          {["Firma Directora","Firma Acudiente"].map(f=>(
+                            <div key={f} style={{textAlign:"center"}}>
+                              <div style={{height:36}}/>
+                              <div style={{borderTop:"1px solid #9ca3af",paddingTop:6,fontSize:11,color:"#9ca3af"}}>{f}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <p style={{textAlign:"center",fontSize:10,color:"#d1d5db",marginTop:14}}>Mis Pequeños Tesoros · Reporte de Seguimiento Individual · {tod()}</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* ── REPORTE POR GRADO ── */}
+              {reporteActivo==="grado"&&(
+                <div>
+                  <div style={{display:"flex",gap:10,marginBottom:18,flexWrap:"wrap",alignItems:"center"}}>
+                    <select value={reporteGrado} onChange={e=>setReporteGrado(e.target.value)}
+                      style={{padding:"9px 14px",borderRadius:10,border:"1px solid #bae6fd",fontSize:13,background:"#fff",flex:1,minWidth:200}}>
+                      <option value="">Seleccionar grado...</option>
+                      {[...new Set(estudiantes.map(s=>s.grado))].sort().map(g=><option key={g}>{g}</option>)}
+                    </select>
+                    <select value={reportePeriodo} onChange={e=>setReportePeriodo(parseInt(e.target.value))}
+                      style={{padding:"9px 14px",borderRadius:10,border:"1px solid #bae6fd",fontSize:13,background:"#fff"}}>
+                      {PERIODOS.map((p,i)=><option key={i} value={i}>{p}</option>)}
+                    </select>
+                    {reporteGrado!=""&&<button onClick={()=>printReporte()} className="xb"
+                      style={{background:"#0369a1",color:"#fff",border:"none",borderRadius:10,padding:"9px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                      🖨️ Imprimir
+                    </button>}
+                  </div>
+                  {reporteGrado!=""&&(()=>{
+                    const stGrado = estudiantes.filter(s=>s.grado===reporteGrado);
+                    const rp      = reportePeriodo+1;
+                    return (
+                      <div id="reporte-print" style={{background:"#fff",borderRadius:14,padding:"28px",boxShadow:"0 2px 16px rgba(0,0,0,.07)"}}>
+                        <div style={{borderBottom:"3px solid #0369a1",paddingBottom:14,marginBottom:20,display:"flex",alignItems:"center",gap:14}}>
+                          {logoUrl?<img src={logoUrl} alt="Escudo" style={{width:48,height:48,borderRadius:"50%",objectFit:"cover",flexShrink:0}}/>:<div style={{width:48,height:48,borderRadius:"50%",background:"linear-gradient(135deg,#0d3320,#1B4332)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>🏫</div>}
+                          <div>
+                            <div style={{fontFamily:"Georgia,serif",fontSize:20,fontWeight:700,color:"#0369a1"}}>Reporte por Grado — {reporteGrado}</div>
+                            <div style={{fontSize:12,color:"#6b7280",marginTop:3}}>{PERIODOS[reportePeriodo]} · {stGrado.length} estudiantes · {tod()}</div>
+                          </div>
+                        </div>
+                        <div style={{overflowX:"auto"}}>
+                          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:400}}>
+                            <thead>
+                              <tr style={{background:"#0369a1",color:"#fff"}}>
+                                <th style={{padding:"9px 12px",textAlign:"left"}}>Estudiante</th>
+                                {actMats.map(m=><th key={m.id} style={{padding:"9px 7px",textAlign:"center",whiteSpace:"nowrap"}}>{m.icono}<br/>{m.nombre}</th>)}
+                                <th style={{padding:"9px 8px",textAlign:"center"}}>Promedio</th>
+                                <th style={{padding:"9px 8px",textAlign:"center"}}>Estado</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {stGrado.map((s,i)=>{
+                                const sn = getNotasPeriodo(s.id,rp);
+                                const a  = getAvg(s.id,rp);
+                                return (
+                                  <tr key={s.id} style={{background:i%2===0?"#fff":"#f0f9ff",borderBottom:"1px solid #e5e7eb"}}>
+                                    <td style={{padding:"9px 12px",fontWeight:600}}>{s.nombre}</td>
+                                    {actMats.map(m=>{
+                                      const n=sn[m.id];
+                                      return <td key={m.id} style={{padding:"8px 6px",textAlign:"center"}}><span style={{background:nBg(n),color:nClr(n),borderRadius:6,padding:"2px 8px",fontWeight:700,fontSize:12}}>{fmt(n)}</span></td>;
+                                    })}
+                                    <td style={{padding:"9px 8px",textAlign:"center"}}><span style={{fontFamily:"Georgia,serif",fontSize:15,fontWeight:700,color:nClr(a)}}>{fmt(a)}</span></td>
+                                    <td style={{padding:"9px 8px",textAlign:"center"}}><span style={{background:nBg(a),color:nClr(a),borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700,whiteSpace:"nowrap"}}>{lbl(a)}</span></td>
+                                  </tr>
+                                );
+                              })}
+                              <tr style={{background:"#e0f2fe",fontWeight:700,borderTop:"2px solid #0369a1"}}>
+                                <td style={{padding:"9px 12px",color:"#0369a1"}}>Promedio del Grado</td>
+                                {actMats.map(m=>{
+                                  const matAvg=avg(stGrado.map(s=>getNotasPeriodo(s.id,rp)[m.id]));
+                                  return <td key={m.id} style={{padding:"8px 6px",textAlign:"center"}}><span style={{color:nClr(matAvg),fontWeight:700}}>{fmt(matAvg)}</span></td>;
+                                })}
+                                <td style={{padding:"9px 8px",textAlign:"center",color:"#0369a1",fontSize:15,fontFamily:"Georgia,serif"}}>{fmt(avg(stGrado.map(s=>getAvg(s.id,rp))))}</td>
+                                <td/>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                        <p style={{textAlign:"center",fontSize:10,color:"#d1d5db",marginTop:20}}>Mis Pequeños Tesoros · Reporte por Grado · {tod()}</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* ── REPORTE POR MATERIA ── */}
+              {reporteActivo==="materia"&&(
+                <div>
+                  <div style={{display:"flex",gap:10,marginBottom:18,flexWrap:"wrap",alignItems:"center"}}>
+                    <select value={reporteMateria} onChange={e=>setReporteMateria(e.target.value)}
+                      style={{padding:"9px 14px",borderRadius:10,border:"1px solid #fef3c7",fontSize:13,background:"#fff",flex:1,minWidth:200}}>
+                      <option value="">Seleccionar materia...</option>
+                      {actMats.map(m=><option key={m.id} value={m.id}>{m.icono} {m.nombre}</option>)}
+                    </select>
+                    <select value={reportePeriodo} onChange={e=>setReportePeriodo(parseInt(e.target.value))}
+                      style={{padding:"9px 14px",borderRadius:10,border:"1px solid #fef3c7",fontSize:13,background:"#fff"}}>
+                      {PERIODOS.map((p,i)=><option key={i} value={i}>{p}</option>)}
+                    </select>
+                    {reporteMateria!=""&&<button onClick={()=>printReporte()} className="xb"
+                      style={{background:"#D4A017",color:"#fff",border:"none",borderRadius:10,padding:"9px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                      🖨️ Imprimir
+                    </button>}
+                  </div>
+                  {reporteMateria!=""&&(()=>{
+                    const mat = actMats.find(m=>String(m.id)===String(reporteMateria));
+                    const rp  = reportePeriodo+1;
+                    const stConNota = estudiantes.map(s=>({...s,nota:getNotasPeriodo(s.id,rp)[reporteMateria]??null})).sort((a,b)=>(b.nota||0)-(a.nota||0));
+                    const matAvg = avg(stConNota.map(s=>s.nota));
+                    return (
+                      <div id="reporte-print" style={{background:"#fff",borderRadius:14,padding:"28px",boxShadow:"0 2px 16px rgba(0,0,0,.07)"}}>
+                        <div style={{borderBottom:"3px solid #D4A017",paddingBottom:14,marginBottom:20,display:"flex",alignItems:"center",gap:14}}>
+                          {logoUrl?<img src={logoUrl} alt="Escudo" style={{width:48,height:48,borderRadius:"50%",objectFit:"cover",flexShrink:0}}/>:<div style={{width:48,height:48,borderRadius:"50%",background:"linear-gradient(135deg,#0d3320,#1B4332)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>🏫</div>}
+                          <div style={{fontSize:40}}>{mat.icono}</div>
+                          <div>
+                            <div style={{fontFamily:"Georgia,serif",fontSize:20,fontWeight:700,color:"#92400e"}}>{mat.nombre}</div>
+                            <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>{PERIODOS[reportePeriodo]} · Docente: {mat.docente||"—"} · {tod()}</div>
+                          </div>
+                        </div>
+                        {/* stats */}
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
+                          {[
+                            {l:"Promedio",v:fmt(matAvg),c:nClr(matAvg)},
+                            {l:"Sobresaliente",v:stConNota.filter(s=>s.nota>=8.5).length,c:"#16a34a"},
+                            {l:"En Riesgo",v:stConNota.filter(s=>s.nota!==null&&s.nota<7).length,c:"#dc2626"},
+                          ].map(x=>(
+                            <div key={x.l} style={{background:"#fffbeb",borderRadius:10,padding:"14px",textAlign:"center",border:"1px solid #fde68a"}}>
+                              <div style={{fontFamily:"Georgia,serif",fontSize:26,fontWeight:700,color:x.c}}>{x.v}</div>
+                              <div style={{fontSize:11,color:"#6b7280",marginTop:2}}>{x.l}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                          <thead>
+                            <tr style={{background:"#D4A017",color:"#fff"}}>
+                              <th style={{padding:"9px 12px",textAlign:"left"}}>#</th>
+                              <th style={{padding:"9px 12px",textAlign:"left"}}>Estudiante</th>
+                              <th style={{padding:"9px 12px",textAlign:"left"}}>Grado</th>
+                              <th style={{padding:"9px 8px",textAlign:"center"}}>Nota</th>
+                              <th style={{padding:"9px 8px",textAlign:"center"}}>Desempeño</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {stConNota.map((s,i)=>(
+                              <tr key={s.id} style={{background:i%2===0?"#fff":"#fffbeb",borderBottom:"1px solid #e5e7eb"}}>
+                                <td style={{padding:"9px 12px",color:"#9ca3af",fontWeight:600}}>{i+1}</td>
+                                <td style={{padding:"9px 12px",fontWeight:600}}>{s.nombre}</td>
+                                <td style={{padding:"9px 12px",color:"#6b7280"}}>{s.grado}</td>
+                                <td style={{padding:"9px 8px",textAlign:"center"}}><span style={{background:nBg(s.nota),color:nClr(s.nota),borderRadius:6,padding:"3px 12px",fontWeight:700,fontSize:15}}>{fmt(s.nota)}</span></td>
+                                <td style={{padding:"9px 8px",textAlign:"center"}}><span style={{background:nBg(s.nota),color:nClr(s.nota),borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700}}>{lbl(s.nota)}</span></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <p style={{textAlign:"center",fontSize:10,color:"#d1d5db",marginTop:20}}>Mis Pequeños Tesoros · Reporte por Materia · {tod()}</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* ── REPORTE GENERAL ── */}
+              {reporteActivo==="general"&&(()=>{
+                const rp = reportePeriodo+1;
+                const gradosUnicos = [...new Set(estudiantes.map(s=>s.grado))].sort();
+                const instAvg = avg(estudiantes.map(s=>getAvg(s.id,rp)));
+                return (
+                  <div>
+                    <div style={{display:"flex",gap:10,marginBottom:18,flexWrap:"wrap",alignItems:"center"}}>
+                      <select value={reportePeriodo} onChange={e=>setReportePeriodo(parseInt(e.target.value))}
+                        style={{padding:"9px 14px",borderRadius:10,border:"1px solid #d1fae5",fontSize:13,background:"#fff"}}>
+                        {PERIODOS.map((p,i)=><option key={i} value={i}>{p}</option>)}
+                      </select>
+                      <button onClick={()=>printReporte("general")} className="xb"
+                        style={{background:"#1B4332",color:"#fff",border:"none",borderRadius:10,padding:"9px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                        🖨️ Imprimir
+                      </button>
+                    </div>
+                    <div id="reporte-print" style={{background:"#fff",borderRadius:14,padding:"28px",boxShadow:"0 2px 16px rgba(0,0,0,.07)"}}>
+                      <div style={{borderBottom:"3px solid #1B4332",paddingBottom:14,marginBottom:20,display:"flex",alignItems:"center",gap:14}}>
+                        {logoUrl?<img src={logoUrl} alt="Escudo" style={{width:52,height:52,borderRadius:"50%",objectFit:"cover",flexShrink:0}}/>:<div style={{width:52,height:52,borderRadius:"50%",background:"linear-gradient(135deg,#0d3320,#1B4332)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,flexShrink:0}}>🏫</div>}
+                        <div>
+                          <div style={{fontFamily:"Georgia,serif",fontSize:20,fontWeight:700,color:"#1B4332"}}>Mis Pequeños Tesoros</div>
+                          <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>Reporte General Institucional · {PERIODOS[reportePeriodo]} · {tod()}</div>
+                        </div>
+                      </div>
+                      {/* stats generales */}
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12,marginBottom:22}}>
+                        {[
+                          {l:"Estudiantes",v:estudiantes.length,c:"#1B4332"},
+                          {l:"Prom. Institucional",v:fmt(instAvg),c:nClr(instAvg)},
+                          {l:"Sobresaliente",v:estudiantes.filter(s=>{ const a=getAvg(s.id,rp); return a!==null&&a>=8.5; }).length,c:"#16a34a"},
+                          {l:"En Riesgo",v:estudiantes.filter(s=>{ const a=getAvg(s.id,rp); return a!==null&&a<7; }).length,c:"#dc2626"},
+                        ].map(x=>(
+                          <div key={x.l} style={{background:"#f9fbf9",borderRadius:10,padding:"14px",textAlign:"center",border:"1px solid #e5e7eb"}}>
+                            <div style={{fontFamily:"Georgia,serif",fontSize:26,fontWeight:700,color:x.c}}>{x.v}</div>
+                            <div style={{fontSize:11,color:"#6b7280",marginTop:2}}>{x.l}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {/* por grado */}
+                      <h3 style={{fontFamily:"Georgia,serif",fontSize:15,color:"#1B4332",marginBottom:12}}>Promedio por Grado</h3>
+                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,marginBottom:20}}>
+                        <thead>
+                          <tr style={{background:"#1B4332",color:"#fff"}}>
+                            <th style={{padding:"9px 12px",textAlign:"left"}}>Grado</th>
+                            <th style={{padding:"9px 8px",textAlign:"center"}}>Estudiantes</th>
+                            <th style={{padding:"9px 8px",textAlign:"center"}}>Promedio</th>
+                            <th style={{padding:"9px 8px",textAlign:"center"}}>Mejor nota</th>
+                            <th style={{padding:"9px 8px",textAlign:"center"}}>En riesgo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {gradosUnicos.map((g,i)=>{
+                            const stG    = estudiantes.filter(s=>s.grado===g);
+                            const avgs   = stG.map(s=>getAvg(s.id,rp)).filter(a=>a!==null);
+                            const gAvg   = avg(avgs);
+                            const mejor  = avgs.length?Math.max(...avgs):null;
+                            const riesgo = avgs.filter(a=>a<7).length;
+                            return (
+                              <tr key={g} style={{background:i%2===0?"#fff":"#f9fbf9",borderBottom:"1px solid #e5e7eb"}}>
+                                <td style={{padding:"9px 12px",fontWeight:700}}>Grado {g}</td>
+                                <td style={{padding:"9px 8px",textAlign:"center"}}>{stG.length}</td>
+                                <td style={{padding:"9px 8px",textAlign:"center"}}><span style={{color:nClr(gAvg),fontWeight:700,fontSize:14,fontFamily:"Georgia,serif"}}>{fmt(gAvg)}</span></td>
+                                <td style={{padding:"9px 8px",textAlign:"center"}}><span style={{color:"#16a34a",fontWeight:700}}>{fmt(mejor)}</span></td>
+                                <td style={{padding:"9px 8px",textAlign:"center"}}><span style={{color:riesgo>0?"#dc2626":"#16a34a",fontWeight:700}}>{riesgo}</span></td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      {/* por materia */}
+                      <h3 style={{fontFamily:"Georgia,serif",fontSize:15,color:"#1B4332",marginBottom:12}}>Promedio por Materia</h3>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:10}}>
+                        {actMats.map(m=>{
+                          const matAvg=avg(estudiantes.map(s=>getNotasPeriodo(s.id,rp)[m.id]).filter(n=>n!=null));
+                          return (
+                            <div key={m.id} style={{background:nBg(matAvg),borderRadius:10,padding:"13px",textAlign:"center",border:"1px solid "+nClr(matAvg)+"44"}}>
+                              <div style={{fontSize:24,marginBottom:4}}>{m.icono}</div>
+                              <div style={{fontSize:12,fontWeight:600,color:"#374151",marginBottom:4}}>{m.nombre}</div>
+                              <div style={{fontFamily:"Georgia,serif",fontSize:22,fontWeight:700,color:nClr(matAvg)}}>{fmt(matAvg)}</div>
+                              <div style={{fontSize:10,color:nClr(matAvg),fontWeight:600}}>{lbl(matAvg)}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p style={{textAlign:"center",fontSize:10,color:"#d1d5db",marginTop:20}}>Mis Pequeños Tesoros · Reporte General Institucional · {tod()}</p>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* ═══════ PORTAL PADRES ═══════ */}
+          {tab==="Portal Padres"&&(
+            <div style={{animation:"fadeIn .35s"}}>
+              <div style={{marginBottom:22}}>
+                <h2 style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#1B4332",margin:0}}>Portal de Padres de Familia</h2>
+                <p style={{fontSize:13,color:"#6b7280",marginTop:6}}>Links únicos para que cada padre vea el avance académico de su hijo/a.</p>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:13}}>
+                {estudiantes.map(s=>{
+                  const a = getAvg(s.id,pk);
+                  return (
+                    <div key={s.id} className="hov" style={{background:"#fff",borderRadius:14,padding:"17px 19px",boxShadow:"0 2px 12px rgba(0,0,0,.07)"}}>
+                      <div style={{display:"flex",gap:11,alignItems:"center",marginBottom:12}}>
+                        <div style={{width:42,height:42,borderRadius:"50%",flexShrink:0,background:"linear-gradient(135deg,#1B4332,#52B788)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold",fontSize:13}}>{s.avatar||mkAv(s.nombre)}</div>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:700,fontSize:14}}>{s.nombre}</div>
+                          <div style={{fontSize:12,color:"#6b7280"}}>Grado {s.grado} · {s.parent_nombre||"Sin acudiente"}</div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <div style={{fontFamily:"'Playfair Display',serif",fontSize:19,fontWeight:700,color:nClr(a)}}>{fmt(a)}</div>
+                          <div style={{fontSize:9,color:"#9ca3af"}}>Promedio</div>
+                        </div>
+                      </div>
+                      <div style={{background:"#f9fbf9",borderRadius:7,padding:"7px 11px",fontSize:11,color:"#6b7280",marginBottom:11,wordBreak:"break-all"}}>
+                        🔗 {window.location.origin}?token={s.parent_token}
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                        <button className="xb" onClick={()=>setPortal(s)} style={{background:"#1B4332",color:"#fff",border:"none",borderRadius:8,padding:"8px 0",fontSize:12,fontWeight:600,cursor:"pointer"}}>👁️ Ver portal</button>
+                        <button className="xb" onClick={()=>{
+                          const link=`${window.location.origin}?token=${s.parent_token}`;
+                          navigator.clipboard?.writeText(link).then(()=>notify("✅ Link copiado")).catch(()=>notify("✅ Link listo"));
+                        }} style={{background:"#7C3AED",color:"#fff",border:"none",borderRadius:8,padding:"8px 0",fontSize:12,fontWeight:600,cursor:"pointer"}}>📋 Copiar</button>
+                        <button className="xb" onClick={()=>setMBoletin(s)} style={{background:"#D4A017",color:"#fff",border:"none",borderRadius:8,padding:"8px 0",fontSize:12,fontWeight:600,cursor:"pointer",gridColumn:"1/-1"}}>📄 Imprimir Boletín {PERIODOS[period]}</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          </>
+        )}
+      </main>
+
+      {/* ════════════════════════════════════════
+          MODALS
+      ════════════════════════════════════════ */}
+
+      {/* NOTAS */}
+      {mNota&&selSt&&(
+        <Overlay onClose={()=>{setMNota(false);setNoteEd({});}}>
+          <MHead title="✏️ Editar Notas" onClose={()=>{setMNota(false);setNoteEd({});}}/>
+          <p style={{fontSize:13,color:"#6b7280",marginBottom:18}}>{selSt.nombre} · Grado {selSt.grado} · {PERIODOS[period]}</p>
+          <div style={{display:"grid",gap:9,marginBottom:20}}>
+            {actMats.map(m=>{
+              const cur = noteEd[m.id]!=null?noteEd[m.id]:getNotasPeriodo(selSt.id,pk)[m.id]??null;
+              return (
+                <div key={m.id} style={{display:"flex",alignItems:"center",gap:11}}>
+                  <span style={{fontSize:17,width:24,textAlign:"center",flexShrink:0}}>{m.icono}</span>
+                  <label style={{flex:1,fontSize:13,fontWeight:500}}>{m.nombre}</label>
+                  <input type="number" min="0" max="10" step="0.1" placeholder="0.0"
+                    value={noteEd[m.id]!==undefined?noteEd[m.id]:getNotasPeriodo(selSt.id,pk)[m.id]??""}
+                    onChange={e=>setNoteEd(n=>({...n,[m.id]:e.target.value===""?undefined:parseFloat(e.target.value)}))}
+                    style={{width:68,padding:"7px 9px",borderRadius:8,border:"2px solid "+nClr(cur),fontSize:15,textAlign:"center",color:nClr(cur),fontWeight:700}}/>
+                  <span style={{background:nBg(cur),color:nClr(cur),fontSize:10,padding:"3px 8px",borderRadius:8,fontWeight:600,minWidth:78,textAlign:"center"}}>{lbl(cur)}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:9}}>
+            <button onClick={()=>{setMNota(false);setNoteEd({});}} style={{padding:"11px",border:"1px solid #e5e7eb",borderRadius:10,background:"#fff",cursor:"pointer",color:"#6b7280"}}>Cancelar</button>
+            <PBtn onClick={saveNotes} disabled={saving}>{saving?"Guardando...":"💾 Guardar en Supabase"}</PBtn>
+          </div>
+        </Overlay>
+      )}
+
+      {/* OBSERVACIONES */}
+      {mObs&&selSt&&(
+        <Overlay onClose={()=>setMObs(false)} wide>
+          <MHead title={"📝 Observaciones · "+selSt.nombre+" · "+PERIODOS[period]} onClose={()=>setMObs(false)}/>
+          <p style={{fontSize:13,color:"#6b7280",marginBottom:18}}>Se guardarán en Supabase y aparecerán en el boletín impreso.</p>
+          <div style={{marginBottom:16}}>
+            <Lbl c="💬 Observación general del período"/>
+            <textarea value={obsEdit.general} onChange={e=>setObsEdit(o=>({...o,general:e.target.value}))} placeholder="Ej: Durante este período el/la estudiante demostró avances significativos..." style={{width:"100%",minHeight:80,padding:"10px 13px",borderRadius:10,border:"1px solid #e5e7eb",fontSize:13,lineHeight:1.5,resize:"vertical",fontFamily:"sans-serif"}}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
+            <div>
+              <Lbl c="⭐ Fortalezas"/>
+              <textarea value={obsEdit.fortalezas} onChange={e=>setObsEdit(o=>({...o,fortalezas:e.target.value}))} placeholder="Participación, liderazgo, responsabilidad..." style={{width:"100%",minHeight:90,padding:"10px 13px",borderRadius:10,border:"1px solid #a7f3d0",fontSize:12,lineHeight:1.5,resize:"vertical",fontFamily:"sans-serif",background:"#f0fdf4"}}/>
+            </div>
+            <div>
+              <Lbl c="📈 Aspectos a mejorar"/>
+              <textarea value={obsEdit.mejorar} onChange={e=>setObsEdit(o=>({...o,mejorar:e.target.value}))} placeholder="Puntualidad en entregas, atención en clase..." style={{width:"100%",minHeight:90,padding:"10px 13px",borderRadius:10,border:"1px solid #fed7aa",fontSize:12,lineHeight:1.5,resize:"vertical",fontFamily:"sans-serif",background:"#fff7ed"}}/>
+            </div>
+          </div>
+          <div style={{marginBottom:22}}>
+            <Lbl c="📚 Observación por materia"/>
+            <div style={{display:"grid",gap:10}}>
+              {actMats.map(m=>(
+                <div key={m.id} style={{display:"flex",alignItems:"flex-start",gap:10}}>
+                  <div style={{width:36,height:36,borderRadius:9,flexShrink:0,background:m.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,marginTop:1}}>{m.icono}</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,fontWeight:600,color:"#374151",marginBottom:4}}>{m.nombre}</div>
+                    <textarea value={(obsEdit.materias||{})[m.id]||""} onChange={e=>setObsEdit(o=>({...o,materias:{...(o.materias||{}),[m.id]:e.target.value}}))} placeholder={"Observación para "+m.nombre+"..."} rows={2} style={{width:"100%",padding:"8px 11px",borderRadius:8,border:"1px solid #e5e7eb",fontSize:12,lineHeight:1.4,resize:"vertical",fontFamily:"sans-serif"}}/>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:9}}>
+            <button onClick={()=>setMObs(false)} style={{padding:"11px",border:"1px solid #e5e7eb",borderRadius:10,background:"#fff",cursor:"pointer",color:"#6b7280"}}>Cancelar</button>
+            <PBtn onClick={saveObs} disabled={saving}>{saving?"Guardando...":"💾 Guardar Observaciones"}</PBtn>
+          </div>
+        </Overlay>
+      )}
+
+      {/* COMENTARIO */}
+      {mComent&&(
+        <Overlay onClose={()=>setMComent(false)}>
+          <MHead title={newCom.tipo==="grupal"?"👥 Comunicado Grupal":"💬 Mensaje Individual"} onClose={()=>setMComent(false)}/>
+          <div style={{marginBottom:14}}>
+            <Lbl c="Tipo de mensaje"/>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {["individual","grupal"].map(t=>(
+                <button key={t} onClick={()=>setNewCom(c=>({...c,tipo:t}))} style={{padding:"10px",border:"2px solid "+(newCom.tipo===t?"#1B4332":"#e5e7eb"),borderRadius:10,background:newCom.tipo===t?"#1B4332":"#fff",color:newCom.tipo===t?"#fff":"#6b7280",cursor:"pointer",fontSize:13,fontWeight:700}}>
+                  {t==="individual"?"👤 Individual":"👥 Grupal"}
+                </button>
+              ))}
+            </div>
+          </div>
+          {newCom.tipo==="individual"?(
+            <div style={{marginBottom:14}}>
+              <Lbl c="Estudiante"/>
+              <select value={newCom.estudiante_id} onChange={e=>setNewCom(c=>({...c,estudiante_id:e.target.value}))} style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid #e5e7eb",fontSize:13,background:"#fff"}}>
+                <option value="">Seleccionar...</option>
+                {estudiantes.map(s=><option key={s.id} value={s.id}>{s.nombre} · Grado {s.grado}</option>)}
+              </select>
+            </div>
+          ):(
+            <div style={{marginBottom:14}}>
+              <Lbl c="Grado destinatario"/>
+              <select value={newCom.grado} onChange={e=>setNewCom(c=>({...c,grado:e.target.value}))} style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid #e5e7eb",fontSize:13,background:"#fff"}}>
+                {GRADES.map(g=><option key={g}>{g}</option>)}
+              </select>
+            </div>
+          )}
+          <div style={{marginBottom:14}}>
+            <Lbl c="Área / Materia"/>
+            <select value={newCom.area} onChange={e=>setNewCom(c=>({...c,area:e.target.value}))} style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid #e5e7eb",fontSize:13,background:"#fff"}}>
+              <option value="General">General</option>
+              {materias.map(m=><option key={m.id} value={m.nombre}>{m.icono} {m.nombre}</option>)}
+            </select>
+          </div>
+          <div style={{marginBottom:20}}>
+            <Lbl c="Mensaje para los padres"/>
+            <textarea value={newCom.texto} onChange={e=>setNewCom(c=>({...c,texto:e.target.value}))} placeholder="Escriba el mensaje que verán los padres..." style={{width:"100%",minHeight:100,padding:"11px 13px",borderRadius:10,border:"1px solid #e5e7eb",fontSize:13,lineHeight:1.5,resize:"vertical"}}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:9}}>
+            <button onClick={()=>setMComent(false)} style={{padding:"11px",border:"1px solid #e5e7eb",borderRadius:10,background:"#fff",cursor:"pointer",color:"#6b7280"}}>Cancelar</button>
+            <PBtn onClick={sendComment} disabled={saving}>{saving?"Enviando...":"📤 Enviar y Guardar"}</PBtn>
+          </div>
+        </Overlay>
+      )}
+
+      {/* NUEVO ESTUDIANTE */}
+      {mStudent&&(
+        <Overlay onClose={()=>setMStudent(false)}>
+          <MHead title="👨‍🎓 Nuevo Estudiante" onClose={()=>setMStudent(false)}/>
+          {[{k:"nombre",l:"Nombre completo *",p:"Ej: Ana María López"},{k:"parent_nombre",l:"Nombre del acudiente",p:"Ej: María López"},{k:"parent_telefono",l:"Teléfono",p:"Ej: 3001234567"},{k:"parent_email",l:"Correo",p:"Ej: acudiente@email.com"}].map(f=>(
+            <div key={f.k} style={{marginBottom:13}}>
+              <Lbl c={f.l}/>
+              <Inp value={newSt[f.k]} onChange={e=>setNewSt(s=>({...s,[f.k]:e.target.value}))} placeholder={f.p}/>
+            </div>
+          ))}
+          <div style={{marginBottom:20}}>
+            <Lbl c="Grado"/>
+            <select value={newSt.grado} onChange={e=>setNewSt(s=>({...s,grado:e.target.value}))} style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid #e5e7eb",fontSize:13,background:"#fff"}}>
+              {GRADES.map(g=><option key={g}>{g}</option>)}
+            </select>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:9}}>
+            <button onClick={()=>setMStudent(false)} style={{padding:"11px",border:"1px solid #e5e7eb",borderRadius:10,background:"#fff",cursor:"pointer",color:"#6b7280"}}>Cancelar</button>
+            <PBtn onClick={addStudent} disabled={saving}>{saving?"Guardando...":"✅ Registrar Estudiante"}</PBtn>
+          </div>
+        </Overlay>
+      )}
+
+      {/* MATERIA */}
+      {mMateria&&(
+        <Overlay onClose={()=>setMMateria(null)} wide>
+          <MHead title={mMateria==="new"?"🗂️ Nueva Materia":"✏️ Editar Materia"} onClose={()=>setMMateria(null)}/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
+            <div><Lbl c="Nombre *"/><Inp value={fMat.nombre} onChange={e=>setFMat(f=>({...f,nombre:e.target.value}))} placeholder="Ej: Química, Música..."/></div>
+            <div><Lbl c="Docente responsable"/><Inp value={fMat.docente} onChange={e=>setFMat(f=>({...f,docente:e.target.value}))} placeholder="Ej: Prof. Martínez"/></div>
+          </div>
+          <div style={{marginBottom:14}}>
+            <Lbl c="Ícono"/>
+            <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+              {ICONOS.map(ic=>(
+                <button key={ic} onClick={()=>setFMat(f=>({...f,icono:ic}))} style={{width:40,height:40,borderRadius:9,cursor:"pointer",fontSize:19,border:"2px solid "+(fMat.icono===ic?"#1B4332":"#e5e7eb"),background:fMat.icono===ic?"#d1fae5":"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>{ic}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{marginBottom:22}}>
+            <Lbl c="Color"/>
+            <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:9}}>
+              {COLORES.map(col=>(
+                <button key={col} onClick={()=>setFMat(f=>({...f,color:col}))} style={{width:30,height:30,borderRadius:"50%",background:col,cursor:"pointer",border:"3px solid "+(fMat.color===col?"#1B4332":"transparent"),boxShadow:fMat.color===col?"0 0 0 2px #fff,0 0 0 4px #1B4332":"none"}}/>
+              ))}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <input type="color" value={fMat.color} onChange={e=>setFMat(f=>({...f,color:e.target.value}))} style={{width:38,height:38,borderRadius:8,border:"1px solid #e5e7eb",cursor:"pointer",padding:2}}/>
+              <span style={{fontSize:12,color:"#6b7280"}}>O elige un color personalizado</span>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:9}}>
+            <button onClick={()=>setMMateria(null)} style={{padding:"11px",border:"1px solid #e5e7eb",borderRadius:10,background:"#fff",cursor:"pointer",color:"#6b7280"}}>Cancelar</button>
+            <PBtn onClick={saveMat} disabled={saving}>{saving?"Guardando...":(mMateria==="new"?"✅ Agregar Materia":"💾 Guardar Cambios")}</PBtn>
+          </div>
+        </Overlay>
+      )}
+
+      {/* CONFIRMAR ELIMINAR MATERIA */}
+      {mDelMat&&(
+        <Overlay onClose={()=>setMDelMat(null)}>
+          <div style={{textAlign:"center",padding:"8px 0"}}>
+            <div style={{fontSize:46,marginBottom:14}}>🗑️</div>
+            <h3 style={{fontFamily:"Georgia,serif",fontSize:19,color:"#1B4332",marginBottom:9}}>¿Eliminar materia?</h3>
+            <p style={{fontSize:13,color:"#6b7280",lineHeight:1.5,marginBottom:6}}>Eliminarás <strong>"{mDelMat.nombre}"</strong> y todas sus notas registradas en Supabase.</p>
+            <p style={{fontSize:12,color:"#DC2626",marginBottom:22}}>⚠️ Esta acción no se puede deshacer.</p>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+              <button onClick={()=>setMDelMat(null)} style={{padding:"11px",border:"1px solid #e5e7eb",borderRadius:10,background:"#fff",cursor:"pointer",color:"#6b7280"}}>Cancelar</button>
+              <PBtn onClick={deleteMat} color="#DC2626" disabled={saving}>{saving?"Eliminando...":"🗑️ Sí, eliminar"}</PBtn>
+            </div>
+          </div>
+        </Overlay>
+      )}
+
+      {/* NUEVA ACTIVIDAD */}
+      {mAct&&(
+        <Overlay onClose={()=>setMAct(false)} wide>
+          <MHead title="📅 Nueva Actividad" onClose={()=>setMAct(false)}/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+            <div>
+              <Lbl c="Estudiante *"/>
+              <select value={newAct.estudiante_id} onChange={e=>setNewAct(a=>({...a,estudiante_id:e.target.value}))}
+                style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid #e5e7eb",fontSize:13,background:"#fff"}}>
+                <option value="">Seleccionar...</option>
+                {estudiantes.map(s=><option key={s.id} value={s.id}>{s.nombre} · {s.grado}</option>)}
+              </select>
+            </div>
+            <div>
+              <Lbl c="Materia *"/>
+              <select value={newAct.materia_id} onChange={e=>setNewAct(a=>({...a,materia_id:e.target.value}))}
+                style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid #e5e7eb",fontSize:13,background:"#fff"}}>
+                <option value="">Seleccionar...</option>
+                {actMats.map(m=><option key={m.id} value={m.id}>{m.icono} {m.nombre}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+            <div>
+              <Lbl c="Tipo de actividad *"/>
+              <select value={newAct.tipo} onChange={e=>setNewAct(a=>({...a,tipo:e.target.value}))}
+                style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid #e5e7eb",fontSize:13,background:"#fff"}}>
+                {Object.entries(ACT_TIPOS).map(([t,{icon,peso}])=>(
+                  <option key={t} value={t}>{icon} {t} ({Math.round(peso*100)}%)</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Lbl c="Período"/>
+              <select value={newAct.periodo} onChange={e=>setNewAct(a=>({...a,periodo:parseInt(e.target.value)}))}
+                style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid #e5e7eb",fontSize:13,background:"#fff"}}>
+                {PERIODOS.map((p,i)=><option key={i} value={i+1}>{p}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{marginBottom:14}}>
+            <Lbl c="Título de la actividad *"/>
+            <Inp value={newAct.titulo} onChange={e=>setNewAct(a=>({...a,titulo:e.target.value}))} placeholder="Ej: Taller de fracciones, Lectura comprensiva..."/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+            <div>
+              <Lbl c="Nota (0 – 10) *"/>
+              <input type="number" min="0" max="10" step="0.1" value={newAct.nota}
+                onChange={e=>setNewAct(a=>({...a,nota:e.target.value}))} placeholder="0.0"
+                style={{width:"100%",padding:"10px 14px",borderRadius:10,border:`2px solid ${nClr(parseFloat(newAct.nota)||null)}`,fontSize:15,fontFamily:"sans-serif",fontWeight:700,color:nClr(parseFloat(newAct.nota)||null),textAlign:"center"}}/>
+            </div>
+            <div>
+              <Lbl c="Fecha"/>
+              <input type="date" value={newAct.fecha} onChange={e=>setNewAct(a=>({...a,fecha:e.target.value}))}
+                style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid #e5e7eb",fontSize:13,fontFamily:"sans-serif"}}/>
+            </div>
+          </div>
+          <div style={{marginBottom:22}}>
+            <Lbl c="Observación (opcional)"/>
+            <textarea value={newAct.observacion} onChange={e=>setNewAct(a=>({...a,observacion:e.target.value}))}
+              placeholder="Ej: Entregó tarde, excelente presentación..."
+              rows={2} style={{width:"100%",padding:"10px 13px",borderRadius:10,border:"1px solid #e5e7eb",fontSize:13,resize:"vertical",fontFamily:"sans-serif"}}/>
+          </div>
+          {/* preview ponderado */}
+          {newAct.nota!==""&&(
+            <div style={{background:"#f0fff4",border:"1px solid #a7f3d0",borderRadius:10,padding:"11px 14px",marginBottom:16,fontSize:12,color:"#065f46"}}>
+              <strong>{ACT_TIPOS[newAct.tipo]?.icon} {newAct.tipo}</strong> pesa el <strong>{Math.round((ACT_TIPOS[newAct.tipo]?.peso||0)*100)}%</strong> del promedio final del período.
+            </div>
+          )}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:9}}>
+            <button onClick={()=>setMAct(false)} style={{padding:"11px",border:"1px solid #e5e7eb",borderRadius:10,background:"#fff",cursor:"pointer",color:"#6b7280"}}>Cancelar</button>
+            <PBtn onClick={saveAct} disabled={saving}>{saving?"Guardando...":"💾 Guardar Actividad"}</PBtn>
+          </div>
+        </Overlay>
+      )}
+
+      {/* CONFIRMAR ELIMINAR ACTIVIDAD */}
+      {mDelAct&&(
+        <Overlay onClose={()=>setMDelAct(null)}>
+          <div style={{textAlign:"center",padding:"8px 0"}}>
+            <div style={{fontSize:40,marginBottom:12}}>🗑️</div>
+            <h3 style={{fontFamily:"Georgia,serif",fontSize:18,color:"#1B4332",marginBottom:8}}>¿Eliminar actividad?</h3>
+            <p style={{fontSize:13,color:"#6b7280",marginBottom:6}}><strong>"{mDelAct.titulo}"</strong></p>
+            <p style={{fontSize:11,color:"#9ca3af",marginBottom:20}}>Esta acción no se puede deshacer.</p>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+              <button onClick={()=>setMDelAct(null)} style={{padding:"11px",border:"1px solid #e5e7eb",borderRadius:10,background:"#fff",cursor:"pointer",color:"#6b7280"}}>Cancelar</button>
+              <PBtn onClick={deleteAct} color="#DC2626" disabled={saving}>{saving?"Eliminando...":"🗑️ Eliminar"}</PBtn>
+            </div>
+          </div>
+        </Overlay>
+      )}
+
+      {/* ELEGIR PERÍODO BOLETÍN */}
+      {mBoletin&&(
+        <Overlay onClose={()=>setMBoletin(null)}>
+          <MHead title="📄 Generar Boletín" onClose={()=>setMBoletin(null)}/>
+          <p style={{fontSize:13,color:"#6b7280",marginBottom:18}}>Selecciona el período para <strong>{mBoletin.nombre}</strong>.</p>
+          <div style={{display:"grid",gap:8,marginBottom:20}}>
+            {PERIODOS.map((p,i)=>{
+              const pn   = getNotasPeriodo(mBoletin.id,i+1);
+              const hasN = actMats.some(m=>pn[m.id]!=null);
+              return (
+                <button key={i} onClick={()=>{ if(!hasN)return; openBoletin(mBoletin,i); }} disabled={!hasN}
+                  style={{padding:"12px 16px",border:"1px solid "+(hasN?"#1B4332":"#e5e7eb"),borderRadius:10,background:hasN?"#f0fff4":"#f9fafb",cursor:hasN?"pointer":"not-allowed",fontSize:13,fontWeight:600,color:hasN?"#1B4332":"#9ca3af",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  {p}
+                  {hasN?<span style={{color:"#52B788"}}>Prom: {fmt(avg(actMats.map(m=>pn[m.id])))} →</span>:<span style={{fontSize:11,color:"#9ca3af"}}>Sin notas</span>}
+                </button>
+              );
+            })}
+          </div>
+          <button onClick={()=>setMBoletin(null)} style={{width:"100%",padding:"11px",border:"1px solid #e5e7eb",borderRadius:10,background:"#fff",cursor:"pointer",color:"#6b7280"}}>Cerrar</button>
+        </Overlay>
+      )}
+
+      {/* LINK PADRE */}
+      {mLink&&(
+        <Overlay onClose={()=>setMLink(null)}>
+          <MHead title="🔗 Portal para Padres" onClose={()=>setMLink(null)}/>
+          <p style={{fontSize:13,color:"#6b7280",marginBottom:13}}>Link para <strong>{mLink.parent_nombre||"el acudiente"}</strong> de <strong>{mLink.nombre}</strong>:</p>
+          <div style={{background:"#f0fff4",border:"1px solid #a7f3d0",borderRadius:9,padding:"12px 15px",fontSize:12,color:"#065f46",wordBreak:"break-all",marginBottom:18}}>
+            🔗 mpt.edu.co/padre/{mLink.parent_token}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:11}}>
+            <PBtn color="#7C3AED" onClick={()=>{navigator.clipboard?.writeText(`mpt.edu.co/padre/${mLink.parent_token}`).then(()=>notify("✅ Link copiado")).catch(()=>notify("✅ Link listo"));}}>📋 Copiar link</PBtn>
+            <PBtn onClick={()=>setPortal(mLink)}>👁️ Ver portal</PBtn>
+          </div>
+          {mLink.parent_telefono&&<div style={{textAlign:"center",fontSize:11,color:"#9ca3af"}}>📱 {mLink.parent_telefono} · {mLink.parent_email}</div>}
+          <button onClick={()=>setMLink(null)} style={{width:"100%",marginTop:13,padding:"11px",border:"1px solid #e5e7eb",borderRadius:10,background:"#fff",cursor:"pointer",color:"#6b7280"}}>Cerrar</button>
+        </Overlay>
+      )}
+
+      {/* BOLETÍN PREVIEW */}
+      {boletinV&&(
+        <Boletin
+          student={boletinV.student}
+          notasMap={boletinV.notasMap}
+          obsData={boletinV.obsData}
+          period={boletinV.period}
+          materias={materias}
+          logoUrl={logoUrl}
+          onClose={()=>setBoletinV(null)}
+        />
+      )}
+    </div>
+  );
+}
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(App));
+  </script>
+</body>
+</html>
