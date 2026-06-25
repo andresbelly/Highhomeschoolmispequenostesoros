@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>High home school Mis Pequeños Tesoros</title>
+  <title>Mis Pequeños Tesoros</title>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -442,42 +442,6 @@ function ParentPortalPublic({token}) {
   // Actividades del período actual — comparación robusta
   const actsDelPeriodo = activs.filter(a=>Number(a.periodo)===period+1);
 
-  // Promedio ponderado robusto
-  function promPonderadoMat(acts) {
-    if(!acts||acts.length===0) return null;
-    let totalPeso=0, totalVal=0;
-    Object.entries(ACT_TIPOS).forEach(([tipo,{peso}])=>{
-      const del=acts.filter(a=>a.tipo===tipo);
-      if(del.length>0){
-        const p=del.reduce((s,a)=>s+parseFloat(a.nota||0),0)/del.length;
-        totalVal+=p*peso; totalPeso+=peso;
-      }
-    });
-    return totalPeso>0?totalVal/totalPeso:null;
-  }
-
-  // Agrupar por semana
-  function agruparPorSemana(acts) {
-    const grupos={};
-    [...acts].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)).forEach(a=>{
-      try {
-        const d=new Date(a.fecha+"T12:00:00");
-        const lunes=new Date(d);
-        lunes.setDate(d.getDate()-((d.getDay()+6)%7));
-        const viernes=new Date(lunes);
-        viernes.setDate(lunes.getDate()+4);
-        const key=lunes.toISOString().split("T")[0];
-        const label=`${lunes.toLocaleDateString("es-CO",{day:"2-digit",month:"short"})} – ${viernes.toLocaleDateString("es-CO",{day:"2-digit",month:"short"})}`;
-        if(!grupos[key]) grupos[key]={label,acts:[]};
-        grupos[key].acts.push(a);
-      } catch(e){ 
-        if(!grupos["sin-fecha"]) grupos["sin-fecha"]={label:"Sin fecha",acts:[]};
-        grupos["sin-fecha"].acts.push(a);
-      }
-    });
-    return Object.values(grupos);
-  }
-
   return (
     <div style={{minHeight:"100vh",background:"linear-gradient(160deg,#0a2918 0%,#1B4332 40%,#2d6a4f 100%)",fontFamily:"sans-serif"}}>
       <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}} @keyframes spin{to{transform:rotate(360deg)}}`}</style>
@@ -539,7 +503,7 @@ function ParentPortalPublic({token}) {
               ? <div style={{textAlign:"center",padding:40,color:"rgba(255,255,255,0.4)",fontSize:13}}>Sin materias registradas.</div>
               : (
                 <div>
-                  {/* promedio card */}
+                  {/* promedio general */}
                   <div style={{background:nBg(prom),border:"2px solid "+nClr(prom),borderRadius:14,padding:"16px 20px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <div>
                       <div style={{fontSize:11,fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:1}}>Promedio General · {PERIODOS[period]}</div>
@@ -548,125 +512,158 @@ function ParentPortalPublic({token}) {
                     <div style={{fontFamily:"Georgia,serif",fontSize:40,fontWeight:700,color:nClr(prom)}}>{fmt(prom)}</div>
                   </div>
 
-                  {/* MATERIAS — clickeables */}
-                  <div style={{fontSize:11,color:"rgba(255,255,255,0.5)",textAlign:"center",marginBottom:12,letterSpacing:1,textTransform:"uppercase"}}>
+                  <p style={{fontSize:11,color:"rgba(255,255,255,0.5)",textAlign:"center",marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>
                     👆 Toca una materia para ver sus actividades
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:16}}>
-                    {mats.map(m=>{
-                      const n       = pNotes[m.id];
-                      const matActs = actsDelPeriodo.filter(a=>String(a.materia_id)===String(m.id));
-                      const selected= String(selectedMat)===String(m.id);
-                      return (
-                        <div key={m.id} onClick={()=>setSelectedMat(selected?null:m.id)}
-                          style={{background:selected?"rgba(82,183,136,0.25)":"rgba(255,255,255,0.08)",
-                                  borderRadius:12,padding:"14px 12px",textAlign:"center",
-                                  border:`2px solid ${selected?"#52B788":"rgba(255,255,255,0.1)"}`,
-                                  cursor:"pointer",transition:"all .2s",
-                                  transform:selected?"scale(1.02)":"scale(1)"}}>
-                          <div style={{fontSize:26,marginBottom:5}}>{m.icono}</div>
-                          <div style={{fontSize:11,color:"rgba(255,255,255,0.7)",marginBottom:6,fontWeight:600}}>{m.nombre}</div>
-                          <div style={{fontFamily:"Georgia,serif",fontSize:26,fontWeight:700,color:nClr(n)}}>{fmt(n)}</div>
-                          <div style={{fontSize:10,color:nClr(n),fontWeight:600,marginTop:2}}>{lbl(n)}</div>
-                          <div style={{fontSize:10,color:"rgba(255,255,255,0.45)",marginTop:6,background:"rgba(255,255,255,0.07)",borderRadius:8,padding:"3px 6px"}}>
-                            {matActs.length} actividad(es)
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  </p>
 
-                  {/* DETALLE ACTIVIDADES */}
-                  {selectedMat&&(()=>{
-                    const mat     = mats.find(m=>String(m.id)===String(selectedMat));
-                    if(!mat) return null;
-                    const matActs = actsDelPeriodo.filter(a=>String(a.materia_id)===String(selectedMat));
-                    const matProm = promPonderadoMat(matActs);
-                    const semanas = agruparPorSemana(matActs);
-                    return(
-                      <div style={{background:"rgba(0,0,0,0.25)",borderRadius:14,marginBottom:16,overflow:"hidden",border:"2px solid rgba(82,183,136,0.4)"}}>
-                        {/* header */}
-                        <div style={{padding:"14px 18px",background:"rgba(82,183,136,0.2)",display:"flex",alignItems:"center",gap:12}}>
-                          <span style={{fontSize:28,flexShrink:0}}>{mat.icono}</span>
+                  {/* CADA MATERIA — expandible */}
+                  {mats.map(m=>{
+                    const nota     = pNotes[m.id];
+                    const isOpen   = String(selectedMat)===String(m.id);
+                    const matActs  = activs.filter(a=>
+                      String(a.materia_id)===String(m.id) &&
+                      Number(a.periodo)===Number(period+1)
+                    );
+
+                    // agrupar por semana
+                    const semanas = {};
+                    [...matActs].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)).forEach(a=>{
+                      try {
+                        const d = new Date(a.fecha+"T12:00:00");
+                        const lunes = new Date(d);
+                        lunes.setDate(d.getDate()-((d.getDay()+6)%7));
+                        const key = lunes.toISOString().slice(0,10);
+                        const viernes = new Date(lunes); viernes.setDate(lunes.getDate()+4);
+                        const label = lunes.toLocaleDateString("es-CO",{day:"2-digit",month:"short"})+" – "+viernes.toLocaleDateString("es-CO",{day:"2-digit",month:"short"});
+                        if(!semanas[key]) semanas[key]={label,acts:[]};
+                        semanas[key].acts.push(a);
+                      } catch(e){
+                        if(!semanas["x"]) semanas["x"]={label:"Sin fecha",acts:[]};
+                        semanas["x"].acts.push(a);
+                      }
+                    });
+
+                    // promedio ponderado de esta materia
+                    let totalPeso=0, totalVal=0;
+                    const tiposEnMat = {};
+                    Object.entries(ACT_TIPOS).forEach(([tipo,{peso}])=>{
+                      const ta=matActs.filter(a=>a.tipo===tipo);
+                      if(ta.length>0){
+                        const p=ta.reduce((s,a)=>s+parseFloat(a.nota||0),0)/ta.length;
+                        totalVal+=p*peso; totalPeso+=peso;
+                        tiposEnMat[tipo]={avg:p, count:ta.length, peso};
+                      }
+                    });
+                    const matProm = totalPeso>0 ? totalVal/totalPeso : null;
+
+                    return (
+                      <div key={m.id} style={{marginBottom:10}}>
+                        {/* TARJETA MATERIA — clickeable */}
+                        <div
+                          onClick={()=>setSelectedMat(isOpen ? null : m.id)}
+                          style={{
+                            background: isOpen ? "rgba(82,183,136,0.2)" : "rgba(255,255,255,0.08)",
+                            borderRadius: isOpen ? "12px 12px 0 0" : 12,
+                            padding:"14px 16px",
+                            border: "2px solid "+(isOpen?"#52B788":"rgba(255,255,255,0.12)"),
+                            borderBottom: isOpen ? "none" : "2px solid "+(isOpen?"#52B788":"rgba(255,255,255,0.12)"),
+                            cursor:"pointer",
+                            display:"flex", alignItems:"center", gap:12,
+                            userSelect:"none",
+                          }}>
+                          <span style={{fontSize:26,flexShrink:0}}>{m.icono}</span>
                           <div style={{flex:1}}>
-                            <div style={{color:"#fff",fontWeight:700,fontSize:16}}>{mat.nombre}</div>
-                            <div style={{color:"rgba(255,255,255,0.55)",fontSize:11,marginTop:2}}>
-                              {mat.docente?`👩‍🏫 ${mat.docente} · `:""}{matActs.length} actividad(es) · {PERIODOS[period]}
+                            <div style={{color:"#fff",fontWeight:700,fontSize:14}}>{m.nombre}</div>
+                            <div style={{fontSize:11,color:"rgba(255,255,255,0.5)",marginTop:2}}>
+                              {matActs.length} actividad(es) · {m.docente||""}
                             </div>
                           </div>
-                          <div style={{textAlign:"center",flexShrink:0}}>
-                            <div style={{fontFamily:"Georgia,serif",fontSize:28,fontWeight:700,color:matProm!=null?nClr(matProm):"rgba(255,255,255,0.4)"}}>
-                              {matProm!=null?fmt(matProm):"—"}
-                            </div>
-                            <div style={{fontSize:9,color:"rgba(255,255,255,0.4)"}}>Prom. ponderado</div>
+                          <div style={{textAlign:"right",flexShrink:0}}>
+                            <div style={{fontFamily:"Georgia,serif",fontSize:24,fontWeight:700,color:nClr(nota)}}>{fmt(nota)}</div>
+                            <div style={{fontSize:9,color:"rgba(255,255,255,0.4)"}}>nota período</div>
+                          </div>
+                          <div style={{color:"rgba(255,255,255,0.5)",fontSize:18,flexShrink:0,marginLeft:4}}>
+                            {isOpen?"▲":"▼"}
                           </div>
                         </div>
 
-                        {matActs.length===0?(
-                          <div style={{padding:"24px",textAlign:"center",color:"rgba(255,255,255,0.4)",fontSize:13}}>
-                            Sin actividades en {PERIODOS[period]}
-                          </div>
-                        ):(
-                          <div style={{padding:"16px 18px"}}>
-                            {/* resumen por tipo */}
-                            <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:16}}>
-                              {Object.entries(ACT_TIPOS).map(([tipo,{color,icon,peso}])=>{
-                                const ta=matActs.filter(a=>a.tipo===tipo);
-                                if(!ta.length) return null;
-                                const taAvg=ta.reduce((s,a)=>s+parseFloat(a.nota||0),0)/ta.length;
-                                return(
-                                  <div key={tipo} style={{background:"rgba(255,255,255,0.07)",borderRadius:20,padding:"5px 11px",fontSize:11,display:"flex",alignItems:"center",gap:5,border:"1px solid rgba(255,255,255,0.1)"}}>
-                                    <span>{icon}</span>
-                                    <span style={{color:"rgba(255,255,255,0.7)"}}>{tipo}</span>
-                                    <span style={{color:nClr(taAvg),fontWeight:700}}>{fmt(taAvg)}</span>
-                                    <span style={{color:"rgba(255,255,255,0.35)",fontSize:10}}>({ta.length}) · {Math.round(peso*100)}%</span>
-                                  </div>
-                                );
-                              })}
+                        {/* PANEL EXPANDIDO */}
+                        {isOpen&&(
+                          <div style={{background:"rgba(0,0,0,0.3)",borderRadius:"0 0 12px 12px",border:"2px solid #52B788",borderTop:"none",padding:"16px"}}>
+
+                            {/* promedio ponderado */}
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,background:"rgba(255,255,255,0.06)",borderRadius:10,padding:"10px 14px"}}>
+                              <div>
+                                <div style={{fontSize:10,color:"rgba(255,255,255,0.45)",textTransform:"uppercase",letterSpacing:1}}>Promedio ponderado</div>
+                                <div style={{fontSize:11,color:nClr(matProm),fontWeight:600,marginTop:2}}>{lbl(matProm)}</div>
+                              </div>
+                              <div style={{fontFamily:"Georgia,serif",fontSize:28,fontWeight:700,color:nClr(matProm)}}>{fmt(matProm)}</div>
                             </div>
 
-                            {/* por semana */}
-                            {semanas.map((sem,si)=>{
-                              const semAvg=sem.acts.reduce((s,a)=>s+parseFloat(a.nota||0),0)/sem.acts.length;
-                              return(
-                                <div key={si} style={{marginBottom:14}}>
-                                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-                                    <div style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:1,whiteSpace:"nowrap"}}>📅 {sem.label}</div>
-                                    <div style={{height:1,flex:1,background:"rgba(255,255,255,0.08)"}}/>
-                                    <div style={{fontFamily:"Georgia,serif",fontSize:14,fontWeight:700,color:nClr(semAvg),whiteSpace:"nowrap"}}>Prom: {fmt(semAvg)}</div>
-                                  </div>
-                                  {sem.acts.map(a=>{
-                                    const nota=parseFloat(a.nota||0);
-                                    const {color,bg,icon}=ACT_TIPOS[a.tipo]||{color:"#6b7280",bg:"rgba(255,255,255,0.05)",icon:"📌"};
-                                    return(
-                                      <div key={a.id} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"10px 12px",borderRadius:10,marginBottom:6,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.07)"}}>
-                                        <span style={{fontSize:18,flexShrink:0,marginTop:1}}>{icon}</span>
-                                        <div style={{flex:1,minWidth:0}}>
-                                          <div style={{color:"#fff",fontWeight:600,fontSize:13,marginBottom:4}}>{a.titulo}</div>
-                                          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                                            <span style={{background:"rgba(255,255,255,0.1)",color:"rgba(255,255,255,0.7)",borderRadius:9,padding:"2px 8px",fontSize:10,fontWeight:600}}>{a.tipo}</span>
-                                            <span style={{color:"rgba(255,255,255,0.4)",fontSize:10}}>📅 {a.fecha}</span>
-                                            {a.observacion&&<span style={{color:"rgba(255,255,255,0.5)",fontSize:10,fontStyle:"italic"}}>· {a.observacion}</span>}
+                            {/* resumen por tipo */}
+                            {Object.keys(tiposEnMat).length>0&&(
+                              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+                                {Object.entries(tiposEnMat).map(([tipo,{avg:ta,count,peso}])=>{
+                                  const {icon}=ACT_TIPOS[tipo]||{icon:"📌"};
+                                  return(
+                                    <div key={tipo} style={{background:"rgba(255,255,255,0.07)",borderRadius:20,padding:"5px 10px",fontSize:10,display:"flex",alignItems:"center",gap:4,border:"1px solid rgba(255,255,255,0.1)"}}>
+                                      <span>{icon}</span>
+                                      <span style={{color:"rgba(255,255,255,0.7)"}}>{tipo}</span>
+                                      <span style={{color:nClr(ta),fontWeight:700}}>{fmt(ta)}</span>
+                                      <span style={{color:"rgba(255,255,255,0.3)"}}>({count}) {Math.round(peso*100)}%</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {matActs.length===0?(
+                              <div style={{textAlign:"center",padding:"20px",color:"rgba(255,255,255,0.35)",fontSize:13}}>
+                                Sin actividades en {PERIODOS[period]}
+                              </div>
+                            ):(
+                              Object.values(semanas).map((sem,si)=>{
+                                const semAvg=sem.acts.reduce((s,a)=>s+parseFloat(a.nota||0),0)/sem.acts.length;
+                                return(
+                                  <div key={si} style={{marginBottom:14}}>
+                                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                                      <span style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.45)",textTransform:"uppercase",letterSpacing:1,whiteSpace:"nowrap"}}>📅 {sem.label}</span>
+                                      <div style={{height:1,flex:1,background:"rgba(255,255,255,0.08)"}}/>
+                                      <span style={{fontFamily:"Georgia,serif",fontSize:13,fontWeight:700,color:nClr(semAvg)}}>Prom: {fmt(semAvg)}</span>
+                                    </div>
+                                    {sem.acts.map(a=>{
+                                      const nota2=parseFloat(a.nota||0);
+                                      const {icon}=ACT_TIPOS[a.tipo]||{icon:"📌"};
+                                      return(
+                                        <div key={a.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10,marginBottom:6,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.07)"}}>
+                                          <span style={{fontSize:18,flexShrink:0}}>{icon}</span>
+                                          <div style={{flex:1,minWidth:0}}>
+                                            <div style={{color:"#fff",fontWeight:600,fontSize:13}}>{a.titulo}</div>
+                                            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:3}}>
+                                              <span style={{background:"rgba(255,255,255,0.1)",color:"rgba(255,255,255,0.65)",borderRadius:9,padding:"1px 7px",fontSize:10}}>{a.tipo}</span>
+                                              <span style={{color:"rgba(255,255,255,0.35)",fontSize:10}}>📅 {a.fecha}</span>
+                                              {a.observacion&&<span style={{color:"rgba(255,255,255,0.45)",fontSize:10,fontStyle:"italic"}}>· {a.observacion}</span>}
+                                            </div>
+                                          </div>
+                                          <div style={{flexShrink:0,textAlign:"center"}}>
+                                            <div style={{background:nBg(nota2),color:nClr(nota2),borderRadius:8,padding:"4px 12px",fontWeight:700,fontSize:18}}>{fmt(nota2)}</div>
+                                            <div style={{fontSize:9,color:nClr(nota2),fontWeight:600,marginTop:1}}>{lbl(nota2)}</div>
                                           </div>
                                         </div>
-                                        <div style={{flexShrink:0,textAlign:"center"}}>
-                                          <div style={{background:nBg(nota),color:nClr(nota),borderRadius:8,padding:"4px 12px",fontWeight:700,fontSize:18}}>{fmt(nota)}</div>
-                                          <div style={{fontSize:9,color:nClr(nota),fontWeight:600,marginTop:2}}>{lbl(nota)}</div>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              );
-                            })}
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })
+                            )}
                           </div>
                         )}
                       </div>
                     );
-                  })()}
+                  })}
 
-                  {/* evolución */}
-                  <div style={{background:"rgba(255,255,255,0.06)",borderRadius:12,padding:"16px 18px",border:"1px solid rgba(255,255,255,0.1)"}}>
+                  {/* evolución por período */}
+                  <div style={{background:"rgba(255,255,255,0.06)",borderRadius:12,padding:"16px 18px",border:"1px solid rgba(255,255,255,0.1)",marginTop:8}}>
                     <div style={{color:"rgba(255,255,255,0.7)",fontWeight:700,fontSize:13,marginBottom:12}}>📈 Evolución por Período</div>
                     <div style={{overflowX:"auto"}}>
                       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:320}}>
